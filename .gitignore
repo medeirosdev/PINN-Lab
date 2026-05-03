@@ -1,0 +1,31 @@
+# Ambientes virtuais
+venv/
+env/
+.env
+
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Banco de dados e Resultados
+pinns.db
+PinnStudio/pinns.db
+PinnStudio/backend/results/
+results/
+
+# Frontend (Node)
+PinnStudio/frontend/node_modules/
+PinnStudio/frontend/dist/
+PinnStudio/frontend/.npm/
+PinnStudio/frontend/.DS_Store
+node_modules/
+
+# IDE e Sistema
+.vscode/
+.idea/
+.DS_Store
+
+# Scratch
+scratch/
