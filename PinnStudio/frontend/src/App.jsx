@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, Play, RefreshCw, BarChart2, Layers, Trash2, Home, BookOpen, MonitorPlay, Save } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Activity, Play, RefreshCw, BarChart2, Layers, Trash2, Home, BookOpen, MonitorPlay, Save, PieChart } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ScatterChart, Scatter, ZAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
 import './index.css';
 
 const API_URL = 'http://localhost:8000';
@@ -62,9 +63,9 @@ function App() {
     }
   };
 
-  const deleteExperiment = async (id, e) => {
-    e.stopPropagation();
-    if (!window.confirm(`Tem certeza que deseja deletar o experimento #${id}? Isso removerá a pasta de resultados.`)) return;
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+
+  const deleteExperiment = async (id) => {
     try {
       await fetch(`${API_URL}/experiments/${id}`, { method: 'DELETE' });
       fetchExperiments();
@@ -72,7 +73,6 @@ function App() {
       console.error(err);
     }
   };
-
   useEffect(() => {
     if (selectedExp) {
       setModalComments(selectedExp.comments || '');
@@ -159,6 +159,7 @@ function App() {
           <span className={`nav-link ${currentRoute === 'home' ? 'active' : ''}`} onClick={() => setCurrentRoute('home')}>Home</span>
           <span className={`nav-link ${currentRoute === 'studio' ? 'active' : ''}`} onClick={() => setCurrentRoute('studio')}>Lab</span>
           <span className={`nav-link ${currentRoute === 'experiments' ? 'active' : ''}`} onClick={() => setCurrentRoute('experiments')}>Experimentos</span>
+          <span className={`nav-link ${currentRoute === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentRoute('analytics')}>Dados Gerais</span>
           <span className={`nav-link ${currentRoute === 'manual' ? 'active' : ''}`} onClick={() => setCurrentRoute('manual')}>Manual</span>
         </div>
       </nav>
@@ -183,6 +184,13 @@ function App() {
                 <div>
                   <h3>Meus Experimentos</h3>
                   <p>Histórico completo e Dashboard 3D.</p>
+                </div>
+              </div>
+              <div className="home-card" onClick={() => setCurrentRoute('analytics')}>
+                <div className="icon-wrapper"><PieChart size={26} /></div>
+                <div>
+                  <h3>Dados Gerais (Analytics)</h3>
+                  <p>Métricas globais de todos os modelos e arquiteturas.</p>
                 </div>
               </div>
               <div className="home-card" onClick={() => setCurrentRoute('manual')}>
@@ -490,7 +498,7 @@ function App() {
                       style={{ cursor: 'pointer', width: '18px', height: '18px', accentColor: 'var(--accent-color)' }}
                     />
                   )}
-                  <button onClick={(e) => deleteExperiment(exp.id, e)} className="btn-close" style={{ padding: '4px', color: 'var(--danger-color)' }} title="Deletar Experimento">
+                  <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(exp.id); }} className="btn-close" style={{ padding: '4px', color: 'var(--danger-color)' }} title="Deletar Experimento">
                     <Trash2 size={16} />
                   </button>
                 </div>
@@ -548,6 +556,126 @@ function App() {
       </div>
     </div>
   )}
+
+      {currentRoute === 'analytics' && (() => {
+        const completedExp = experiments.filter(e => e.status === 'COMPLETED');
+        if(completedExp.length === 0) return <div style={{padding:'40px',color:'#fff'}}>Nenhum experimento concluído ainda.</div>;
+
+        const totalTime = completedExp.reduce((s, e) => s + (e.time_taken_sec || 0), 0);
+        
+        const archStats = completedExp.reduce((acc, exp) => {
+          const arch = `${exp.n_layers}x${exp.n_neurons}`;
+          if (!acc[arch]) acc[arch] = { name: arch, count: 0, sum: 0 };
+          acc[arch].count++;
+          acc[arch].sum += exp.loss_final || 0;
+          return acc;
+        }, {});
+        
+        const archData = Object.values(archStats).map(d => ({ name: d.name, avgLoss: d.sum / d.count }));
+        const bestArch = archData.length > 0 ? archData.reduce((prev, curr) => prev.avgLoss < curr.avgLoss ? prev : curr) : null;
+
+        const top5 = [...completedExp].sort((a,b) => (a.loss_final||99) - (b.loss_final||99)).slice(0,5);
+
+        return (
+          <div style={{ padding: '40px', overflowY: 'auto', flex: 1, color: 'var(--text-primary)', maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+              <h1 style={{ color: '#fff' }}><PieChart style={{display:'inline', marginRight:'10px'}}/> Dados Gerais (Analytics)</h1>
+            </div>
+
+            {/* KPIs */}
+            <div className="kpi-grid">
+              <div className="kpi-card">
+                <h4>Total de Treinamentos</h4>
+                <div className="kpi-value">{completedExp.length}</div>
+                <div className="kpi-subtext">Experimentos concluídos</div>
+              </div>
+              <div className="kpi-card">
+                <h4>Tempo Computacional Total</h4>
+                <div className="kpi-value">{(totalTime / 60).toFixed(1)} <span style={{fontSize:'1rem'}}>min</span></div>
+                <div className="kpi-subtext">{(totalTime / 3600).toFixed(2)} horas</div>
+              </div>
+              <div className="kpi-card">
+                <h4>Melhor Arquitetura Média</h4>
+                <div className="kpi-value" style={{color: 'var(--accent-color)'}}>{bestArch ? bestArch.name : '-'}</div>
+                <div className="kpi-subtext">Loss: {bestArch ? bestArch.avgLoss.toExponential(2) : '-'}</div>
+              </div>
+              <div className="kpi-card">
+                <h4>Menor Erro Atingido</h4>
+                <div className="kpi-value" style={{color: '#10b981'}}>{top5.length > 0 ? top5[0].loss_final.toExponential(2) : '-'}</div>
+                <div className="kpi-subtext">Pelo Experimento #{top5.length > 0 ? top5[0].id : '-'}</div>
+              </div>
+            </div>
+
+            <div className="analytics-grid">
+              {/* Gráfico 1: Loss Média por Arquitetura */}
+              <div className="card" style={{ padding: '25px', height: '350px' }}>
+                <h3 style={{ marginBottom: '20px', color: 'var(--accent-color)' }}>Loss Média por Arquitetura (Camadas x Neurônios)</h3>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={archData} margin={{ top: 5, right: 30, left: 20, bottom: 25 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis dataKey="name" stroke="var(--text-muted)" angle={-45} textAnchor="end" />
+                    <YAxis scale="log" domain={['auto', 'auto']} stroke="var(--text-muted)" tickFormatter={(v) => v.toExponential(1)} />
+                    <RechartsTooltip cursor={{fill: 'rgba(255,255,255,0.05)'}} contentStyle={{backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '8px'}} formatter={(val) => val.toExponential(4)} />
+                    <Bar dataKey="avgLoss" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Loss Média" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Gráfico 2: Tempo vs Épocas (Dispersão) */}
+              <div className="card" style={{ padding: '25px', height: '350px' }}>
+                <h3 style={{ marginBottom: '20px', color: '#10b981' }}>Custo Computacional: Tempo (s) vs Épocas Totais</h3>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis type="number" dataKey="epochs" name="Épocas" stroke="var(--text-muted)" />
+                    <YAxis type="number" dataKey="time" name="Tempo (s)" stroke="var(--text-muted)" />
+                    <ZAxis type="category" dataKey="model" name="Física" />
+                    <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '8px'}} />
+                    <Scatter name="Experimentos" data={completedExp.map(exp => ({
+                      id: exp.id, epochs: (exp.epochs_adam||0) + (exp.epochs_lbfgs||0), time: exp.time_taken_sec || 0, model: exp.model_type
+                    }))} fill="#10b981" />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Tabela: Top 5 Experimentos */}
+              <div className="card analytics-full" style={{ padding: '25px' }}>
+                <h3 style={{ marginBottom: '20px', color: '#f59e0b' }}>Top 5 Experimentos (Menor Loss Final)</h3>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '10px' }}>ID</th>
+                        <th style={{ padding: '10px' }}>Física</th>
+                        <th style={{ padding: '10px' }}>Condição Inicial</th>
+                        <th style={{ padding: '10px' }}>Rede</th>
+                        <th style={{ padding: '10px' }}>Loss Final</th>
+                        <th style={{ padding: '10px' }}>Erro L2</th>
+                        <th style={{ padding: '10px' }}>Difusão Num.</th>
+                        <th style={{ padding: '10px' }}>Tempo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {top5.map(exp => (
+                        <tr key={exp.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <td style={{ padding: '10px', color: '#fff', fontWeight: 'bold' }}>#{exp.id}</td>
+                          <td style={{ padding: '10px' }}>{exp.model_type}</td>
+                          <td style={{ padding: '10px' }}>{exp.u0_name}</td>
+                          <td style={{ padding: '10px' }}>{exp.n_layers}x{exp.n_neurons}</td>
+                          <td style={{ padding: '10px', color: '#ef4444' }}>{exp.loss_final?.toExponential(4)}</td>
+                          <td style={{ padding: '10px', color: '#10b981' }}>{exp.l2_error ? exp.l2_error.toExponential(4) : '-'}</td>
+                          <td style={{ padding: '10px', color: 'var(--accent-hover)' }}>{exp.nu_numerical ? exp.nu_numerical.toExponential(4) : '-'}</td>
+                          <td style={{ padding: '10px' }}>{exp.time_taken_sec ? exp.time_taken_sec.toFixed(1) + 's' : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {currentRoute === 'compare' && (
         <div style={{ padding: '40px', overflowY: 'auto', flex: 1, color: 'var(--text-primary)' }}>
@@ -659,6 +787,25 @@ function App() {
                   <img src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/slices.png`} alt="Slices Temporais" />
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Confirmar Exclusão */}
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal-content" style={{maxWidth: '400px', height: 'auto', padding: '25px', display: 'block'}} onClick={e => e.stopPropagation()}>
+            <h2 style={{marginTop: 0, color: 'var(--danger-color)'}}>Confirmar Exclusão</h2>
+            <p style={{margin: '20px 0', color: 'var(--text-primary)', lineHeight: '1.5'}}>
+              Tem certeza que deseja deletar o experimento <strong>#{deleteConfirm}</strong>? Essa ação removerá a pasta de resultados permanentemente.
+            </p>
+            <div style={{display: 'flex', gap: '15px', justifyContent: 'flex-end', marginTop: '25px'}}>
+              <button className="btn-close" style={{padding: '10px 20px'}} onClick={() => setDeleteConfirm(null)}>Cancelar</button>
+              <button className="btn-primary" style={{backgroundColor: 'var(--danger-color)', padding: '10px 20px'}} onClick={() => {
+                deleteExperiment(deleteConfirm);
+                setDeleteConfirm(null);
+              }}>Deletar</button>
             </div>
           </div>
         </div>
