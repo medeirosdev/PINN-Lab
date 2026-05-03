@@ -25,7 +25,11 @@ class Experiment(Base):
     
     # Results
     status = Column(String, default="RUNNING") # RUNNING, COMPLETED, FAILED
+    time_taken_sec = Column(Float, nullable=True) # Tempo total de treinamento
     loss_final = Column(Float, nullable=True)
+    loss_f_final = Column(Float, nullable=True) # Resíduo da PDE
+    loss_u_final = Column(Float, nullable=True) # Erro de fronteira/inicial
+    l2_error = Column(Float, nullable=True) # Erro L2 Relativo (se solução exata existir)
     nu_numerical = Column(Float, nullable=True)
     diagnostico = Column(String, nullable=True)
     results_dir = Column(String, nullable=True)

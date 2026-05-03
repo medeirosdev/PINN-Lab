@@ -81,13 +81,36 @@ def run_simulation(experiment_id: int):
             raise ValueError(f"Unknown model_type: {exp.model_type}")
 
         trainer = Trainer(cfg, model, ds, res_fn)
-        trainer.train(verbose=False)
+        import time
+        start_time = time.time()
         
+        # Treinamento
+        trainer.train(verbose=False)
+
+        end_time = time.time()
+        time_taken = end_time - start_time
+
+        # Extraindo dados pós-treino
+        final_loss = trainer.history["loss"][-1] if trainer.history["loss"] else None
+        final_loss_f = trainer.history["loss_phys"][-1] if trainer.history["loss_phys"] else None
+        final_loss_u = trainer.history["loss_data"][-1] if trainer.history["loss_data"] else None
+
+        # Erro L2 (se exata existir)
+        l2_err = None
+        if exact_fn:
+            # Calcula o L2 apenas no slice t_max
+            x_test = np.linspace(cfg.x_min, cfg.x_max, 200)
+            x_t = torch.tensor(x_test).float().unsqueeze(1)
+            t_t = torch.ones_like(x_t) * cfg.t_max
+            u_pred = model(x_t, t_t).detach().numpy().flatten()
+            u_exact = exact_fn(x_test, cfg.t_max)
+            l2_err = np.linalg.norm(u_pred - u_exact) / np.linalg.norm(u_exact)
+
         analyzer = Analyzer(cfg, model, res_fn)
         
-        # Save plots
-        import matplotlib.pyplot as plt
-        
+        # Salva o array de history para possíveis plotagens futuras (Comparison)
+        np.save(os.path.join(results_dir, "history.npy"), trainer.history)
+
         # Slices
         fig = viz.plot_slices(
             model, cfg.x_min, cfg.x_max, t_vals=[0.0, 0.25, 0.5, 0.75, 1.0],
@@ -133,10 +156,15 @@ def run_simulation(experiment_id: int):
         plt.close(fig)
 
         # Update DB
-        exp.loss_final = trainer.history["loss"][-1]
+        exp.status = "COMPLETED"
+        exp.loss_final = final_loss
+        exp.loss_f_final = final_loss_f
+        exp.loss_u_final = final_loss_u
+        exp.time_taken_sec = time_taken
+        if l2_err is not None:
+            exp.l2_error = float(l2_err)
         exp.nu_numerical = analyzer.nu_numerical(0.5)
         exp.diagnostico = analyzer.diagnose(0.5)
-        exp.status = "COMPLETED"
         db.commit()
 
     except Exception as e:

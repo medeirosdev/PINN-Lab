@@ -23,8 +23,12 @@ class ExperimentResponse(ExperimentCreate):
     id: int
     timestamp: datetime
     status: str
-    loss_final: Optional[float]
-    nu_numerical: Optional[float]
+    time_taken_sec: Optional[float] = None
+    loss_final: Optional[float] = None
+    loss_f_final: Optional[float] = None
+    loss_u_final: Optional[float] = None
+    l2_error: Optional[float] = None
+    nu_numerical: Optional[float] = None
     diagnostico: Optional[str] = None
     results_dir: Optional[str] = None
     comments: Optional[str] = None

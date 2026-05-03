@@ -83,3 +83,54 @@ def update_experiment(experiment_id: int, update_data: schemas.ExperimentUpdate,
     db.commit()
     db.refresh(db_exp)
     return db_exp
+
+from fastapi.responses import FileResponse
+@app.get("/compare/loss")
+def compare_losses(ids: str, db: Session = Depends(get_db)):
+    """Retorna um gráfico PNG sobrepondo as curvas de loss dos experimentos passados (ids=1,2,3)"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import tempfile
+
+    exp_ids = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+    if not exp_ids:
+        raise HTTPException(status_code=400, detail="Nenhum ID válido fornecido.")
+
+    experiments = db.query(models.Experiment).filter(models.Experiment.id.in_(exp_ids)).all()
+    if not experiments:
+        raise HTTPException(status_code=404, detail="Experimentos não encontrados.")
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6']
+    
+    for i, exp in enumerate(experiments):
+        if not exp.results_dir: continue
+        history_path = os.path.join(exp.results_dir, "history.npy")
+        if not os.path.exists(history_path): continue
+        
+        history = np.load(history_path, allow_pickle=True).item()
+        loss = history.get("loss", [])
+        
+        c = colors[i % len(colors)]
+        label = f"Exp {exp.id}: {exp.model_type} (Ep: {len(loss)})"
+        ax.plot(loss, label=label, color=c, alpha=0.8, linewidth=2)
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Épocas", fontsize=12)
+    ax.set_ylabel("Loss Total (MSE)", fontsize=12)
+    ax.set_title("Comparação de Convergência (Loss)", fontsize=14, pad=15)
+    ax.grid(True, which="both", ls="--", alpha=0.2)
+    ax.legend(loc='upper right', frameon=True, fancybox=True, framealpha=0.9)
+    
+    plt.tight_layout()
+    
+    # Save to a temporary file
+    fd, path = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    plt.savefig(path, dpi=120, bbox_inches='tight', facecolor='#ffffff')
+    plt.close(fig)
+    
+    return FileResponse(path, media_type="image/png")

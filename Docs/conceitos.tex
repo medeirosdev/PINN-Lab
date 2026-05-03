@@ -1,0 +1,145 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\geometry{margin=2.5cm}
+
+\title{\textbf{Conceitos Necessários --- MS901/MT861}\\
+\large Integração de Machine Learning e Análise Numérica para EDPs}
+\author{Estudo pessoal}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+% -------------------------------------------------------
+\section*{Equações Diferenciais Parciais (EDPs)}
+
+\begin{itemize}
+    \item Classificação de EDPs: hiperbólicas, parabólicas, elípticas
+    \item Problema de Cauchy: condições iniciais e de contorno
+    \item EDPs lineares e não lineares
+    \item Operador não linear $\mathcal{N}(u)$
+    \item Equação de advecção linear: $u_t + a u_x = 0$
+    \item Equação de Burgers invíscida: $u_t + \left(\frac{u^2}{2}\right)_x = 0$
+    \item Equação de Burgers viscosa (com termo difusivo $\epsilon \Delta u$)
+    \item Equação de Buckley-Leverett (modelo de dois fluidos em meios porosos)
+    \item Leis de conservação hiperbólicas em 1D e 2D
+    \item Problema de Riemann: dados iniciais descontínuos
+    \item Ondas de choque (\textit{shock waves})
+    \item Ondas de rarefação (\textit{rarefaction fan})
+    \item Condição de Rankine-Hugoniot (velocidade de propagação do choque)
+    \item Dados iniciais suaves vs.\ dados iniciais descontínuos
+\end{itemize}
+
+% -------------------------------------------------------
+\section*{Soluções Fracas e Teoria de Entropia}
+
+\begin{itemize}
+    \item Definição de solução fraca (formulação variacional)
+    \item Funções teste $\phi \in C^1_c(\mathbb{R}^2 \times \mathbb{R}_+)$
+    \item Espaços funcionais: $L^\infty$, $L^1$, $C^1_c$
+    \item Integração por partes em domínios espaço-temporais
+    \item Não unicidade de soluções fracas
+    \item Condição de entropia de Kru\v{z}kov: $\partial_t |u - c| + (\partial_x + \partial_y) Q[u;c] \leq 0$
+    \item Par entropia-fluxo $(η, q)$: convexidade de $\eta$ e relação $Dq = D\eta \cdot Df(u)$
+    \item Dissipação de entropia: $\partial_t \eta(u) + \partial_x q(u) + \partial_y q(u) \leq 0$
+    \item Formulação variacional de Dafermos para o problema de Riemann
+    \item Minimização da taxa de variação da entropia total $H = \frac{d}{dt}\int \eta(u)\,dxdy$
+    \item Solução admissível (solução de entropia)
+\end{itemize}
+
+% -------------------------------------------------------
+\section*{Análise Numérica de EDPs}
+
+\begin{itemize}
+    \item Consistência de um método numérico
+    \item Estabilidade de um método numérico
+    \item Convergência (Teorema de Lax-Richtmyer: consistência + estabilidade $\Rightarrow$ convergência)
+    \item Condição CFL (Courant-Friedrichs-Lewy)
+    \item Método de diferenças finitas (explícito e implícito)
+    \item Método de Lax-Friedrichs
+    \item Método de Lax-Wendroff
+    \item Erro de truncamento e ordem de acurácia
+    \item Análise de Fourier (von Neumann) para estabilidade
+    \item Difusão numérica (\textit{numerical diffusion}) --- erros de ordem par
+    \item Dispersão numérica (\textit{numerical dispersion}) --- erros de ordem ímpar
+    \item Viscosidade artificial como mecanismo de estabilização
+    \item Métodos \textit{upwind}
+    \item Métodos de volumes finitos
+    \item Discretização por Monte Carlo de funcionais integrais
+\end{itemize}
+
+% -------------------------------------------------------
+\section*{Teoria da Equação Modificada}
+
+\begin{itemize}
+    \item Conceito de equação modificada (\textit{modified equation})
+    \item Análise de Hirt: expansão em série de Taylor do esquema numérico
+    \item Identificação do termo de erro dominante (difusivo ou dispersivo)
+    \item Resíduo como perturbação: $\mathcal{L}(\hat{u}) = \epsilon$
+    \item Diagnóstico físico do resíduo: difusão vs.\ dispersão
+    \item Equação modificada de uma PINN (``Equação Modificada Neural'')
+    \item Efeito da função de ativação e profundidade da rede na equação modificada
+\end{itemize}
+
+% -------------------------------------------------------
+\section*{Physics-Informed Neural Networks (PINNs)}
+
+\begin{itemize}
+    \item Arquitetura de uma PINN: entrada $(x,t)$, saída $u_\theta(x,t)$
+    \item Diferenciação automática (\textit{automatic differentiation})
+    \item Função de perda residual da EDP: $\mathcal{L}_f(u) = \frac{1}{N_f}\sum |f(x_f^i, t_f^i)|^2$
+    \item Função de perda de condição inicial: $\mathcal{L}_{u_0}$
+    \item Função de perda de condição de contorno: $\mathcal{L}_{bc}$
+    \item Perda total e problema de otimização: $\theta^* = \arg\min_\theta \max_\phi \mathcal{L}$
+    \item Pontos de colocação (\textit{collocation points})
+    \item Parâmetro de regularização $\lambda$ (ponderação das parcelas da loss)
+    \item PINN clássica vs.\ PINN fraca (\textit{weakPINN})
+    \item Formulação PDE-informed (informada pela estrutura da EDP)
+    \item Formulação fraca da PINN: uso de funções teste e funcional de entropia
+    \item Funcional de Kru\v{z}kov discretizado: $\mathcal{L}_0(u, \phi, c)$
+    \item Adição de termo difusivo $\epsilon \Delta u$ para estabilização
+    \item PINN híbrida (weakPINN + difusão)
+    \item Métricas de erro: ELF e EEL (comparação com soluções de referência)
+    \item Hiperparâmetros: número de camadas, neurônios por camada, épocas, $\epsilon$
+\end{itemize}
+
+% -------------------------------------------------------
+\section*{Otimização e Aprendizado de Máquina}
+
+\begin{itemize}
+    \item Descida do gradiente (\textit{gradient descent})
+    \item Otimizador SGD (\textit{Stochastic Gradient Descent})
+    \item Otimizador Adam
+    \item Análise de otimizadores como sistemas dinâmicos discretos
+    \item Relação entre passo de tempo do otimizador e métodos de integração numérica
+    \item \textit{Backpropagation}
+    \item Funções de ativação: $\tanh$, ReLU, sigmoid, etc.
+    \item \textit{Universal Approximation Theorem} (redes como aproximadores funcionais)
+    \item Regularização e generalização
+    \item \textit{Overfitting} e \textit{underfitting}
+\end{itemize}
+
+% -------------------------------------------------------
+\section*{Tópicos Avançados e Transversais}
+
+\begin{itemize}
+    \item Maldição da dimensionalidade (\textit{curse of dimensionality})
+    \item PINNs como método \textit{meshless} em alta dimensão
+    \item Distinção entre erro numérico (discretização) e incerteza epistêmica (dados)
+    \item Cálculo de alto desempenho (HPC) com GPUs
+    \item Equações de leis de conservação em mecânica dos fluidos (advecção, Euler, Navier-Stokes)
+    \item Modelos de escoamento em meios porosos (Buckley-Leverett, Darcy)
+    \item Normas funcionais: $L^1$, $L^2$, $L^\infty$
+    \item Espaços de Sobolev $H^1$, $W^{k,p}$
+    \item Redação de relatório técnico científico em \LaTeX
+    \item Interpretação física de resultados computacionais
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,11 @@
+\babel@toc {brazil}{}\relax 
+\contentsline {section}{\numberline {1}Introdução}{2}{section.1}%
+\contentsline {section}{\numberline {2}Motivação e Contexto}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}O Problema da Análise do Erro em PINNs}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}A Teoria da Equação Modificada como Ferramenta de Auditoria}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Por que isso importa?}{4}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Estrutura do Projeto}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Modelo I: Equação de Advecção Linear}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Modelo II: Equação de Burgers Invíscida}{5}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Metodologia de Diagnóstico}{5}{subsection.3.3}%
+\contentsline {section}{\numberline {4}Perguntas de Pesquisa}{6}{section.4}%

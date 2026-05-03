@@ -11,6 +11,23 @@ function App() {
   const [selectedExp, setSelectedExp] = useState(null);
   const [modalComments, setModalComments] = useState('');
   
+  // Comparação
+  const [selectedForCompare, setSelectedForCompare] = useState([]);
+
+  const handleSelectCompare = (id, checked) => {
+    if (checked) {
+      if (selectedForCompare.length < 3) {
+        setSelectedForCompare([...selectedForCompare, id]);
+      } else {
+        alert("Você pode comparar no máximo 3 experimentos simultaneamente.");
+      }
+    } else {
+      setSelectedForCompare(selectedForCompare.filter(expId => expId !== id));
+    }
+  };
+
+  const selectedExperimentsData = experiments.filter(exp => selectedForCompare.includes(exp.id));
+  
   // Filtros
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterModel, setFilterModel] = useState('ALL');
@@ -148,26 +165,37 @@ function App() {
 
       {currentRoute === 'home' && (
         <div className="home-container">
-          <div className="hero-text">
-            <h1>Simulações Físicas com Redes Neurais</h1>
-            <p>Plataforma interativa para explorar, treinar e diagnosticar modelos Physics-Informed Neural Networks (PINNs) utilizando equações de Advecção e Burgers.</p>
+          <div className="hero-content">
+            <div className="hero-text">
+              <h1>Simulações Físicas com Redes Neurais</h1>
+              <p>Plataforma interativa para explorar, treinar e diagnosticar modelos Physics-Informed Neural Networks (PINNs) utilizando equações de Advecção e Burgers.</p>
+            </div>
+            <div className="home-grid">
+              <div className="home-card" onClick={() => setCurrentRoute('studio')}>
+                <div className="icon-wrapper"><MonitorPlay size={26} /></div>
+                <div>
+                  <h3>PINN Lab</h3>
+                  <p>Ambiente completo de simulação em tempo real.</p>
+                </div>
+              </div>
+              <div className="home-card" onClick={() => setCurrentRoute('experiments')}>
+                <div className="icon-wrapper"><Layers size={26} /></div>
+                <div>
+                  <h3>Meus Experimentos</h3>
+                  <p>Histórico completo e Dashboard 3D.</p>
+                </div>
+              </div>
+              <div className="home-card" onClick={() => setCurrentRoute('manual')}>
+                <div className="icon-wrapper"><BookOpen size={26} /></div>
+                <div>
+                  <h3>Manual & Teoria</h3>
+                  <p>Equações, funções e diagnóstico de Fourier.</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="home-grid">
-            <div className="home-card" onClick={() => setCurrentRoute('studio')}>
-              <div className="icon-wrapper"><MonitorPlay size={26} /></div>
-              <h3>PINN Lab</h3>
-              <p>Ambiente completo de simulação. Configure hiperparâmetros, inicie treinamentos e veja as soluções convergirem em tempo real.</p>
-            </div>
-            <div className="home-card" onClick={() => setCurrentRoute('experiments')}>
-              <div className="icon-wrapper"><Layers size={26} /></div>
-              <h3>Meus Experimentos</h3>
-              <p>Acesse o painel com o histórico de todos os seus experimentos. Compare métricas, adicione anotações e analise os gráficos 3D.</p>
-            </div>
-            <div className="home-card" onClick={() => setCurrentRoute('manual')}>
-              <div className="icon-wrapper"><BookOpen size={26} /></div>
-              <h3>Manual & Teoria</h3>
-              <p>Aprenda como configurar as PINNs, entenda a teoria da Equação Modificada e explore o catálogo de condições iniciais disponíveis.</p>
-            </div>
+          <div className="hero-image-wrapper">
+            <img src="/hero-image.png" alt="Physics-Informed Neural Network" className="hero-image" />
           </div>
         </div>
       )}
@@ -182,10 +210,55 @@ function App() {
             <h3 style={{ color: 'var(--accent-color)', marginBottom: '15px' }}>2. Parâmetros de Treinamento</h3>
             <p style={{ marginBottom: '20px', lineHeight: '1.6', color: 'var(--text-muted)' }}>A plataforma utiliza um esquema de otimização híbrido. O otimizador <strong>Adam</strong> é excelente para a convergência inicial rápida, enquanto o <strong>L-BFGS</strong> (um método de quase-Newton) é usado no final do treinamento para atingir altíssima precisão numérica na loss. Tente usar 2000 épocas de Adam e 500 de L-BFGS.</p>
 
-            <h3 style={{ color: 'var(--accent-color)', marginBottom: '15px' }}>3. Catálogo de Condições Iniciais</h3>
-            <p style={{ marginBottom: '20px', lineHeight: '1.6', color: 'var(--text-muted)' }}>O Lab suporta mais de 24 condições iniciais pré-programadas para estressar a rede neural. Utilize funções suaves (como a Gaussiana e o Seno) para avaliar o quão bem a rede advecta, e funções descontínuas (como o Degrau de Heaviside ou Dente de Serra) para forçar o fenômeno de difusão/dispersão numérica e a formação de choques de Burgers.</p>
+            <h3 style={{ color: 'var(--accent-color)', marginBottom: '15px', marginTop: '30px' }}>3. Catálogo Completo de Condições Iniciais <span style={{fontFamily:'serif'}}>u(x, t=0)</span></h3>
+            <p style={{ marginBottom: '20px', lineHeight: '1.6', color: 'var(--text-muted)' }}>O PINN Lab suporta 24 condições iniciais pré-programadas para avaliar a capacidade da rede de capturar diferentes fenômenos físicos. Abaixo, as expressões matemáticas originais de cada uma:</p>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                <h4 style={{color:'#fff', marginBottom:'10px', fontSize:'1rem'}}>Família Suave (Advecção)</h4>
+                <ul style={{ color:'var(--text-muted)', fontSize:'0.9rem', paddingLeft:'20px', display:'flex', flexDirection:'column', gap:'8px' }}>
+                  <li><strong>Gaussiana:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = A · exp( -(x-c)² / 2σ² )</code></li>
+                  <li><strong>Seno:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = A · sin(k·π·x)</code></li>
+                  <li><strong>Cosseno:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = A · cos(k·π·x)</code></li>
+                  <li><strong>Pacote de Ondas:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = exp(-x² / 2σ²) · sin(k·π·x)</code></li>
+                  <li><strong>Bump Suave:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = exp(1 - 1/(1-x²))</code> para |x|&lt;1, senão 0</li>
+                </ul>
+              </div>
 
-            <h3 style={{ color: 'var(--accent-color)', marginBottom: '15px' }}>4. Diagnóstico Físico via Equação Modificada</h3>
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                <h4 style={{color:'#fff', marginBottom:'10px', fontSize:'1rem'}}>Família Descontínua (Choques)</h4>
+                <ul style={{ color:'var(--text-muted)', fontSize:'0.9rem', paddingLeft:'20px', display:'flex', flexDirection:'column', gap:'8px' }}>
+                  <li><strong>Heaviside (Degrau):</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = 1 (x ≤ 0); 0 (x &gt; 0)</code></li>
+                  <li><strong>Choque de Riemann:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = 1.0 (x ≤ 0); 0.2 (x &gt; 0)</code></li>
+                  <li><strong>Rarefação de Riemann:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = 0.2 (x ≤ 0); 1.0 (x &gt; 0)</code></li>
+                  <li><strong>Degrau Duplo:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = 1 (x&lt;-0.5); 0.5 (|x|≤0.5); 0 (x&gt;0.5)</code></li>
+                  <li><strong>Três Estados:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = 1 (x&lt;-1); 0 (|x|≤1); -1 (x&gt;1)</code></li>
+                </ul>
+              </div>
+
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                <h4 style={{color:'#fff', marginBottom:'10px', fontSize:'1rem'}}>Família Com Cantos (Difusão Numérica)</h4>
+                <ul style={{ color:'var(--text-muted)', fontSize:'0.9rem', paddingLeft:'20px', display:'flex', flexDirection:'column', gap:'8px' }}>
+                  <li><strong>Dente de Serra:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = x - ⌊x⌋</code></li>
+                  <li><strong>Onda Quadrada:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = sgn(sin(k·π·x))</code></li>
+                  <li><strong>Chapéu (Triângulo):</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = max(0, 1 - |x|)</code></li>
+                  <li><strong>Trapézio:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = 1 se |x|&lt;0.5; transição linear; 0 se |x|&gt;1</code></li>
+                </ul>
+              </div>
+
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                <h4 style={{color:'#fff', marginBottom:'10px', fontSize:'1rem'}}>Família Composta / Exótica</h4>
+                <ul style={{ color:'var(--text-muted)', fontSize:'0.9rem', paddingLeft:'20px', display:'flex', flexDirection:'column', gap:'8px' }}>
+                  <li><strong>Soliton (KdV):</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = A · sech²( √(A/2) · x )</code></li>
+                  <li><strong>Onda-N (Burgers):</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = x/(1+t) · exp(-x²/4ν(1+t))</code></li>
+                  <li><strong>Wavelet Ricker:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = (1 - x²/σ²) · exp(-x²/2σ²)</code></li>
+                  <li><strong>Multi-Bump:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = Σ exp(-(x-c_i)² / 2σ²)</code></li>
+                  <li><strong>Chirp:</strong> <code style={{color:'var(--accent-hover)'}}>u(x) = sin( k · π · x² )</code> (Frequência var.)</li>
+                </ul>
+              </div>
+            </div>
+
+            <h3 style={{ color: 'var(--accent-color)', marginBottom: '15px', marginTop: '30px' }}>4. Diagnóstico Físico via Equação Modificada</h3>
             <p style={{ marginBottom: '20px', lineHeight: '1.6', color: 'var(--text-muted)' }}>No "Dashboard" de cada experimento, o gráfico do "Espectro de Fourier do Resíduo" lhe dirá exatamente onde a rede está errando. Uma concentração de erro em baixas frequências espaciais (k pequeno) indica que a rede está injetando difusão (suavizando muito a onda). Erros em altas frequências indicam dispersão (oscilações indesejadas).</p>
           </div>
         </div>
@@ -408,6 +481,15 @@ function App() {
                 <span className="card-title">Exp #{exp.id}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span className={`status-badge status-${exp.status}`}>{exp.status}</span>
+                  {currentRoute === 'experiments' && exp.status === 'COMPLETED' && (
+                    <input 
+                      type="checkbox" 
+                      title="Selecionar para comparação"
+                      checked={selectedForCompare.includes(exp.id)}
+                      onChange={(e) => handleSelectCompare(exp.id, e.target.checked)}
+                      style={{ cursor: 'pointer', width: '18px', height: '18px', accentColor: 'var(--accent-color)' }}
+                    />
+                  )}
                   <button onClick={(e) => deleteExperiment(exp.id, e)} className="btn-close" style={{ padding: '4px', color: 'var(--danger-color)' }} title="Deletar Experimento">
                     <Trash2 size={16} />
                   </button>
@@ -445,9 +527,72 @@ function App() {
             <p style={{color: 'var(--text-muted)'}}>Nenhum experimento corresponde aos filtros selecionados.</p>
           )}
         </div>
+        
+        {currentRoute === 'experiments' && selectedForCompare.length >= 2 && (
+          <button 
+            onClick={() => setCurrentRoute('compare')}
+            style={{
+              position: 'fixed', bottom: '40px', right: '40px',
+              padding: '15px 30px', fontSize: '1.1rem', fontWeight: 600,
+              backgroundColor: 'var(--accent-color)', color: '#fff',
+              border: 'none', borderRadius: '30px', cursor: 'pointer',
+              boxShadow: '0 10px 25px rgba(59, 130, 246, 0.4)',
+              display: 'flex', alignItems: 'center', gap: '10px',
+              animation: 'slideUp 0.3s ease-out'
+            }}
+          >
+            <BarChart2 size={24} />
+            Comparar Selecionados ({selectedForCompare.length})
+          </button>
+        )}
       </div>
     </div>
   )}
+
+      {currentRoute === 'compare' && (
+        <div style={{ padding: '40px', overflowY: 'auto', flex: 1, color: 'var(--text-primary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+            <h1 style={{ color: '#fff' }}><BarChart2 style={{display:'inline', marginRight:'10px'}}/> Comparação de Experimentos</h1>
+            <button className="btn-close" onClick={() => setCurrentRoute('experiments')}>Voltar para Experimentos</button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedExperimentsData.length}, 1fr)`, gap: '20px', marginBottom: '30px' }}>
+            {selectedExperimentsData.map(exp => (
+              <div key={exp.id} className="card" style={{ padding: '20px' }}>
+                <h3 style={{ color: 'var(--accent-color)', marginBottom: '15px' }}>Experimento #{exp.id}</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.9rem', marginBottom: '15px' }}>
+                  <p style={{color: 'var(--text-muted)'}}>Física: <strong style={{color:'#fff'}}>{exp.model_type}</strong></p>
+                  <p style={{color: 'var(--text-muted)'}}>u0: <strong style={{color:'#fff'}}>{exp.u0_name}</strong></p>
+                  <p style={{color: 'var(--text-muted)'}}>Rede: <strong style={{color:'#fff'}}>{exp.n_layers}x{exp.n_neurons}</strong></p>
+                  <p style={{color: 'var(--text-muted)'}}>Épocas: <strong style={{color:'#fff'}}>{exp.epochs_adam} + {exp.epochs_lbfgs}</strong></p>
+                </div>
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Loss Total:</span> <strong style={{color: '#ef4444'}}>{exp.loss_final?.toExponential(4) || 'N/A'}</strong></p>
+                  <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Erro L2:</span> <strong style={{color: '#10b981'}}>{exp.l2_error ? exp.l2_error.toExponential(4) : 'N/A'}</strong></p>
+                  <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tempo (s):</span> <strong>{exp.time_taken_sec ? exp.time_taken_sec.toFixed(1) : 'N/A'}</strong></p>
+                </div>
+                {exp.results_dir && (
+                  <div style={{ marginTop: '20px', borderRadius: '8px', overflow: 'hidden' }}>
+                    <p style={{textAlign:'center', fontSize:'0.85rem', marginBottom:'5px', color:'var(--text-muted)'}}>Superfície 3D</p>
+                    <img src={`${API_URL}/results/${exp.results_dir.split('/').pop()}/animation_3d.gif`} alt="3D" style={{ width: '100%', borderRadius: '8px' }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="card" style={{ padding: '30px' }}>
+            <h3 style={{ marginBottom: '20px' }}>Curvas de Convergência (Loss History)</h3>
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+              <img 
+                src={`${API_URL}/compare/loss?ids=${selectedForCompare.join(',')}`} 
+                alt="Loss Comparison Chart" 
+                style={{ width: '100%', maxWidth: '900px', borderRadius: '12px', border: '1px solid var(--border-color)' }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Modal Detalhes */}
       {selectedExp && (
