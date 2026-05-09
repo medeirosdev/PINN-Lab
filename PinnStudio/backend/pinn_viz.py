@@ -4,17 +4,23 @@ pinn_viz.py
 Biblioteca de visualização para PINNs — MS901/MT861.
 
 Funções:
-  plot_loss()           — histórico de loss (escala log)
-  plot_slices()         — u(x, t_i) em vários instantes
-  plot_heatmap()        — mapa de calor u(x, t) 2D
-  plot_surface_3d()     — superfície 3D u(x, t)
-  animate_solution()    — animação da evolução u(x, t)
-  plot_residual()       — resíduo no espaço
-  plot_fourier()        — espectro de Fourier do resíduo
-  plot_fourier_panel()  — resíduo + FFT lado a lado
-  plot_energy()         — norma L² vs cota de Gronwall
-  plot_error()          — erro pontual PINN vs solução exata
-  dashboard()           — painel completo (solução + loss + Fourier)
+  plot_loss()             — histórico de loss (escala log)
+  plot_slices()           — u(x, t_i) em vários instantes
+  plot_heatmap()          — mapa de calor u(x, t) 2D
+  plot_surface_3d()       — superfície 3D u(x, t)
+  animate_solution()      — animação da evolução u(x, t)
+  plot_residual()         — resíduo no espaço
+  plot_fourier()          — espectro de Fourier do resíduo
+  plot_fourier_panel()    — resíduo + FFT lado a lado
+  plot_energy()           — norma L² vs cota de Gronwall
+  plot_error()            — erro pontual PINN vs solução exata
+  dashboard()             — painel completo (solução + loss + Fourier)
+  plot_spectral_analysis()  — difusão e dispersão numérica via Fourier
+  plot_error_heatmap()      — mapas de calor: PINN | exata | |erro|
+  plot_error_curve()        — curvas L²(t) e L∞(t) vs tempo
+  plot_comparison_panel()   — painel 2×2 de comparação PINN vs exata
+  plot_surface_3d_trio()    — três superfícies 3D: PINN | exata | |erro|
+  plot_surface_3d_interactive() — superfície(s) 3D interativas via Plotly (HTML)
 """
 
 from __future__ import annotations
@@ -631,3 +637,472 @@ def dashboard(
     plt.tight_layout()
     _save(fig, savefig)
     return fig
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. ANÁLISE ESPECTRAL PROFUNDA (DIAGNÓSTICO FÍSICO)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_spectral_analysis(
+    analyzer,
+    t_val: float = 0.5,
+    title: str = "Diagnóstico Físico do Resíduo (Fourier)",
+    savefig: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Plota a análise espectral profunda mostrando Difusão e Dispersão Numérica.
+    """
+    res = analyzer.deep_spectral_analysis(t_val, N=512)
+    k_v = res['k_valid']
+    
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle(f"{title} - t={t_val}", fontsize=14, fontweight="bold")
+
+    # Gráfico 1: Parte Real (Difusão) vs k^2
+    ax1 = axes[0]
+    ax1.plot(k_v**2, res['H_real'], 'o', color='tab:blue', alpha=0.5, label='Dados Re(H)')
+    # Linha de ajuste (Difusão)
+    k2_line = np.linspace(0, np.max(k_v**2), 50)
+    ax1.plot(k2_line, -res['nu_num'] * k2_line, 'r-', lw=2, label=f'Ajuste (ν={res["nu_num"]:.3e})')
+    ax1.set_xlabel(r"$k^2$")
+    ax1.set_ylabel(r"$Re[H(k)]$")
+    ax1.set_title("Diagnóstico de Difusão Numérica")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+
+    # Gráfico 2: Parte Imaginária (Dispersão) vs k^3
+    ax2 = axes[1]
+    ax2.plot(k_v**3, res['H_imag'], 'o', color='tab:orange', alpha=0.5, label='Dados Im(H)')
+    # Linha de ajuste (Dispersão)
+    k3_line = np.linspace(0, np.max(k_v**3), 50)
+    ax2.plot(k3_line, -res['mu_num'] * k3_line, 'g-', lw=2, label=f'Ajuste (μ={res["mu_num"]:.3e})')
+    ax2.set_xlabel(r"$k^3$")
+    ax2.set_ylabel(r"$Im[H(k)]$")
+    ax2.set_title("Diagnóstico de Dispersão Numérica")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    plt.tight_layout()
+    _save(fig, savefig)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. MAPA DE CALOR DO ERRO PINN vs EXATA
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_error_heatmap(
+    model,
+    exact_fn: Callable,
+    x_min: float, x_max: float,
+    t_min: float, t_max: float,
+    Nx: int = 256,
+    Nt: int = 200,
+    title: str = "Comparação PINN vs Exata",
+    device: str = "cpu",
+    savefig: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Painel de 3 mapas de calor no domínio (x, t):
+      esquerda  — u_PINN(x, t)
+      centro    — u_exata(x, t)
+      direita   — |u_PINN − u_exata|(x, t)  em escala logarítmica
+
+    Parâmetros
+    ----------
+    exact_fn : callable (x_np, t_val) → u_np
+    """
+    # grade espaciotemporal
+    xv = np.linspace(x_min, x_max, Nx)
+    tv = np.linspace(t_min, t_max, Nt)
+    X_mg, T_mg = np.meshgrid(xv, tv, indexing="ij")  # shape (Nx, Nt)
+
+    # predição PINN em toda a grade
+    dev = torch.device(device)
+    x_flat = torch.tensor(X_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    t_flat = torch.tensor(T_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    with torch.no_grad():
+        U_pinn = model(x_flat, t_flat).cpu().numpy().reshape(Nx, Nt)
+
+    # solução exata coluna a coluna (uma slice por instante)
+    U_exact = np.stack([exact_fn(xv, t) for t in tv], axis=1)  # (Nx, Nt)
+
+    err_abs = np.abs(U_pinn - U_exact)
+
+    # limites de cor simétricos para soluções
+    vmax_sol = max(np.abs(U_pinn).max(), np.abs(U_exact).max())
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+    fig.suptitle(title, fontsize=13, fontweight="bold")
+
+    extent = [t_min, t_max, x_min, x_max]
+
+    def _imshow(ax, data, cmap, label, vmin=None, vmax=None, log=False):
+        if log:
+            data_plot = np.log10(np.maximum(data, 1e-16))
+            im = ax.imshow(data_plot, origin="lower", aspect="auto",
+                           extent=extent, cmap=cmap, vmin=vmin, vmax=vmax)
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label("log₁₀|erro|")
+        else:
+            im = ax.imshow(data, origin="lower", aspect="auto",
+                           extent=extent, cmap=cmap, vmin=vmin, vmax=vmax)
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        ax.set_xlabel("t")
+        ax.set_ylabel("x")
+        ax.set_title(label)
+
+    _imshow(axes[0], U_pinn,  _CMAP_SOL, "u — PINN",       vmin=-vmax_sol, vmax=vmax_sol)
+    _imshow(axes[1], U_exact, _CMAP_SOL, "u — Exata",      vmin=-vmax_sol, vmax=vmax_sol)
+    _imshow(axes[2], err_abs, "inferno",  "|erro| (log₁₀)", log=True)
+
+    plt.tight_layout()
+    _save(fig, savefig)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 13. CURVAS DE ERRO L²(t) E L∞(t)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_error_curve(
+    metrics: Dict,
+    title: str = "Evolução do Erro PINN vs Exata",
+    savefig: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Plota L²_rel(t) e L∞(t) usando o dicionário retornado por
+    ``Analyzer.compute_error_metrics()``.
+
+    Parâmetros
+    ----------
+    metrics : dict com chaves 't_vals', 'l2_rel', 'linf'
+    """
+    t     = np.asarray(metrics["t_vals"])
+    l2    = np.asarray(metrics["l2_rel"])
+    linf  = np.asarray(metrics["linf"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    fig.suptitle(title, fontsize=13, fontweight="bold")
+
+    ax_l2, ax_linf = axes
+
+    ax_l2.semilogy(t, l2, lw=2, color="tab:blue")
+    ax_l2.set_xlabel("t")
+    ax_l2.set_ylabel(r"$\|u_{PINN} - u_{ex}\|_{L^2} \,/\, \|u_{ex}\|_{L^2}$")
+    ax_l2.set_title(f"Erro L² relativo  (máx = {l2.max():.2e})")
+    ax_l2.grid(True, which="both", alpha=0.25)
+    ax_l2.axhline(l2.max(), color="tab:blue", ls=":", alpha=0.5)
+
+    ax_linf.semilogy(t, linf, lw=2, color="tab:orange")
+    ax_linf.set_xlabel("t")
+    ax_linf.set_ylabel(r"$\|u_{PINN} - u_{ex}\|_{L^\infty}$")
+    ax_linf.set_title(f"Erro L∞ pontual  (máx = {linf.max():.2e})")
+    ax_linf.grid(True, which="both", alpha=0.25)
+    ax_linf.axhline(linf.max(), color="tab:orange", ls=":", alpha=0.5)
+
+    plt.tight_layout()
+    _save(fig, savefig)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. PAINEL DE COMPARAÇÃO 2×2  (PINN vs EXATA)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_comparison_panel(
+    model,
+    exact_fn: Callable,
+    analyzer,
+    metrics: Dict,
+    x_min: float, x_max: float,
+    t_min: float, t_max: float,
+    t_slices: Optional[List[float]] = None,
+    title: str = "Painel de Comparação PINN vs Exata",
+    device: str = "cpu",
+    savefig: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Painel 2×2 reunindo os principais diagnósticos de comparação:
+
+      [0,0] — fatias u(x, t_i): PINN (sólido) vs Exata (tracejado)
+      [0,1] — mapa de calor do erro absoluto |u_PINN − u_exata| (log)
+      [1,0] — curvas L²_rel(t) e L∞(t) vs tempo
+      [1,1] — espectro de Fourier do resíduo PINN no instante central
+
+    Parâmetros
+    ----------
+    metrics   : dict retornado por ``Analyzer.compute_error_metrics()``
+    t_slices  : instantes usados no subplot de fatias; padrão [0, 0.5, 1.0]
+    """
+    if t_slices is None:
+        t_slices = [0.0, 0.5, 1.0]
+
+    fig = plt.figure(figsize=(16, 10))
+    fig.suptitle(title, fontsize=14, fontweight="bold")
+
+    gs = fig.add_gridspec(2, 2, hspace=0.38, wspace=0.32)
+    ax_slices  = fig.add_subplot(gs[0, 0])
+    ax_heatmap = fig.add_subplot(gs[0, 1])
+    ax_err     = fig.add_subplot(gs[1, 0])
+    ax_fourier = fig.add_subplot(gs[1, 1])
+
+    dev  = torch.device(device)
+    x_np = np.linspace(x_min, x_max, 512)
+    colors = plt.cm.viridis(np.linspace(0.15, 0.85, len(t_slices)))
+
+    # ── [0,0] Fatias de solução ──────────────────────────────────────────────
+    for color, t_val in zip(colors, t_slices):
+        x_t = torch.tensor(x_np, dtype=torch.float32).unsqueeze(1).to(dev)
+        t_t = torch.full_like(x_t, t_val)
+        with torch.no_grad():
+            u_pinn = model(x_t, t_t).cpu().numpy().ravel()
+        u_ex = exact_fn(x_np, t_val)
+        ax_slices.plot(x_np, u_pinn, color=color, lw=2,   label=f"PINN  t={t_val:.1f}")
+        ax_slices.plot(x_np, u_ex,   color=color, lw=1.5, ls="--", label=f"Exata t={t_val:.1f}")
+
+    ax_slices.set_xlabel("x")
+    ax_slices.set_ylabel("u(x, t)")
+    ax_slices.set_title("Fatias: PINN (sólido) vs Exata (---)")
+    ax_slices.legend(fontsize=7, ncol=2)
+    ax_slices.grid(True, alpha=0.2)
+
+    # ── [0,1] Mapa de calor do erro absoluto ─────────────────────────────────
+    Nx, Nt = 200, 150
+    xv = np.linspace(x_min, x_max, Nx)
+    tv = np.linspace(t_min, t_max, Nt)
+    X_mg, T_mg = np.meshgrid(xv, tv, indexing="ij")
+    x_flat = torch.tensor(X_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    t_flat = torch.tensor(T_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    with torch.no_grad():
+        U_pinn_grid = model(x_flat, t_flat).cpu().numpy().reshape(Nx, Nt)
+    U_exact_grid = np.stack([exact_fn(xv, t) for t in tv], axis=1)
+    err_log = np.log10(np.maximum(np.abs(U_pinn_grid - U_exact_grid), 1e-16))
+
+    extent = [t_min, t_max, x_min, x_max]
+    im = ax_heatmap.imshow(err_log, origin="lower", aspect="auto",
+                           extent=extent, cmap="inferno")
+    fig.colorbar(im, ax=ax_heatmap, fraction=0.046, pad=0.04).set_label("log₁₀|erro|")
+    ax_heatmap.set_xlabel("t")
+    ax_heatmap.set_ylabel("x")
+    ax_heatmap.set_title("|u_PINN − u_exata|  (escala log₁₀)")
+
+    # ── [1,0] Curvas de erro L² e L∞ ─────────────────────────────────────────
+    t_arr  = np.asarray(metrics["t_vals"])
+    l2_arr = np.asarray(metrics["l2_rel"])
+    li_arr = np.asarray(metrics["linf"])
+
+    ax_err.semilogy(t_arr, l2_arr, lw=2, color="tab:blue",   label=r"$L^2$ rel")
+    ax_err.semilogy(t_arr, li_arr, lw=2, color="tab:orange", label=r"$L^\infty$")
+    ax_err.set_xlabel("t")
+    ax_err.set_ylabel("Erro")
+    ax_err.set_title("Evolução do erro vs tempo")
+    ax_err.legend()
+    ax_err.grid(True, which="both", alpha=0.25)
+
+    # ── [1,1] Espectro de Fourier do resíduo ──────────────────────────────────
+    t_mid  = 0.5 * (t_min + t_max)
+    freqs, spec = analyzer.fft_residual(t_mid, N=len(x_np))
+
+    ax_fourier.semilogy(freqs[1:], spec[1:], lw=1.5, color="tab:purple")
+    ax_fourier.set_xlabel("Frequência k")
+    ax_fourier.set_ylabel("|FFT(resíduo)|")
+    ax_fourier.set_title(f"Espectro do resíduo PINN  (t = {t_mid:.2f})")
+    ax_fourier.grid(True, which="both", alpha=0.25)
+
+    _save(fig, savefig)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. TRIO DE SUPERFÍCIES 3D  (PINN | EXATA | |ERRO|)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_surface_3d_trio(
+    model,
+    exact_fn: Callable,
+    x_min: float, x_max: float,
+    t_min: float, t_max: float,
+    Nx: int = 120,
+    Nt: int = 120,
+    title: str = "Superfícies 3D — PINN | Exata | |Erro|",
+    elev: float = 28.0,
+    azim: float = -55.0,
+    device: str = "cpu",
+    savefig: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Três superfícies 3D lado a lado:
+      esquerda — u_PINN(x, t)
+      centro   — u_exata(x, t)
+      direita  — |u_PINN − u_exata|(x, t)  em escala logarítmica
+
+    Parâmetros
+    ----------
+    exact_fn : callable (x_np, t_val) → u_np
+    elev, azim : ângulo de visão inicial (graus)
+    """
+    # ── grade e predições ─────────────────────────────────────────────────────
+    xv = np.linspace(x_min, x_max, Nx)
+    tv = np.linspace(t_min, t_max, Nt)
+    X_mg, T_mg = np.meshgrid(xv, tv, indexing="ij")   # (Nx, Nt)
+
+    dev = torch.device(device)
+    x_flat = torch.tensor(X_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    t_flat = torch.tensor(T_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    with torch.no_grad():
+        U_pinn = model(x_flat, t_flat).cpu().numpy().reshape(Nx, Nt)
+
+    U_exact = np.stack([exact_fn(xv, t) for t in tv], axis=1)   # (Nx, Nt)
+    E_abs   = np.abs(U_pinn - U_exact)
+    E_log   = np.log10(np.maximum(E_abs, 1e-16))
+
+    # grade meshgrid para plot_surface (eixos: T horizontal, X profundidade)
+    T_plot = T_mg   # (Nx, Nt)
+    X_plot = X_mg   # (Nx, Nt)
+
+    # limites de cor simétricos para soluções
+    vmax = max(np.abs(U_pinn).max(), np.abs(U_exact).max())
+
+    # ── figura com 3 eixos 3D ────────────────────────────────────────────────
+    fig = plt.figure(figsize=(21, 6))
+    fig.suptitle(title, fontsize=14, fontweight="bold")
+
+    specs = [
+        (U_pinn, _CMAP_SOL, "u — PINN",         -vmax, vmax,  False),
+        (U_exact, _CMAP_SOL, "u — Exata",        -vmax, vmax,  False),
+        (E_log,  "inferno",  "|erro| (log₁₀)",   None,  None,  True),
+    ]
+
+    for idx, (Z, cmap, label, zmin, zmax, is_log) in enumerate(specs, 1):
+        ax = fig.add_subplot(1, 3, idx, projection="3d")
+
+        surf = ax.plot_surface(
+            T_plot, X_plot, Z,
+            cmap=cmap,
+            vmin=zmin, vmax=zmax,
+            linewidth=0,
+            antialiased=True,
+            alpha=0.92,
+        )
+        cbar = fig.colorbar(surf, ax=ax, shrink=0.45, pad=0.08)
+        if is_log:
+            cbar.set_label("log₁₀|u_PINN − u_exata|", fontsize=8)
+
+        ax.set_xlabel("t", labelpad=6)
+        ax.set_ylabel("x", labelpad=6)
+        ax.set_zlabel("u" if not is_log else "log₁₀|e|", labelpad=6)
+        ax.set_title(label, fontsize=11)
+        ax.view_init(elev=elev, azim=azim)
+
+    plt.tight_layout()
+    _save(fig, savefig)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Superfícies 3D Interativas (Plotly)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_surface_3d_interactive(
+    model,
+    x_min: float, x_max: float,
+    t_min: float, t_max: float,
+    exact_fn: Optional[Callable] = None,
+    title: str = "Superfície 3D Interativa",
+    Nx: int = 120,
+    Nt: int = 120,
+    device: str = "cpu",
+    savefig: Optional[str] = None,
+) -> None:
+    """Gera superfície(s) 3D interativas via Plotly e salva como HTML autocontido.
+
+    Se ``exact_fn`` for fornecida, gera três subplots lado a lado:
+    PINN | Exata | log₁₀|erro|. Caso contrário, apenas a superfície da PINN.
+
+    O arquivo HTML é autocontido (inclui plotly.js) e pode ser aberto
+    diretamente no browser ou embutido via <iframe>.
+
+    Parâmetros
+    ----------
+    savefig : caminho do arquivo .html de saída (obrigatório na prática).
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    xv = np.linspace(x_min, x_max, Nx)
+    tv = np.linspace(t_min, t_max, Nt)
+    X_mg, T_mg = np.meshgrid(xv, tv, indexing="ij")   # (Nx, Nt)
+
+    dev = torch.device(device)
+    x_flat = torch.tensor(X_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    t_flat = torch.tensor(T_mg.ravel(), dtype=torch.float32).unsqueeze(1).to(dev)
+    with torch.no_grad():
+        U_pinn = model(x_flat, t_flat).cpu().numpy().reshape(Nx, Nt)
+
+    # eixos: plotly usa (y=linhas, x=colunas) → passamos tv como "x" e xv como "y"
+    # para que t fique no eixo horizontal e x no vertical (convencional em PDE).
+    common_surface_kw = dict(x=tv, y=xv, colorscale="RdBu_r")
+
+    if exact_fn is None:
+        fig = go.Figure()
+        vmax = float(np.abs(U_pinn).max()) or 1.0
+        fig.add_trace(go.Surface(
+            **common_surface_kw,
+            z=U_pinn,
+            cmin=-vmax, cmax=vmax,
+            name="PINN",
+            colorbar=dict(title="u"),
+        ))
+        fig.update_layout(
+            title=title,
+            scene=dict(
+                xaxis_title="t",
+                yaxis_title="x",
+                zaxis_title="u",
+            ),
+            margin=dict(l=0, r=0, t=50, b=0),
+            height=600,
+        )
+    else:
+        U_exact = np.stack([exact_fn(xv, t) for t in tv], axis=1)   # (Nx, Nt)
+        E_log   = np.log10(np.maximum(np.abs(U_pinn - U_exact), 1e-16))
+        vmax    = float(max(np.abs(U_pinn).max(), np.abs(U_exact).max())) or 1.0
+
+        fig = make_subplots(
+            rows=1, cols=3,
+            specs=[[{"type": "surface"}, {"type": "surface"}, {"type": "surface"}]],
+            subplot_titles=["PINN", "Solução Exata", "log₁₀|erro|"],
+            horizontal_spacing=0.02,
+        )
+
+        fig.add_trace(go.Surface(
+            **common_surface_kw, z=U_pinn,
+            cmin=-vmax, cmax=vmax,
+            colorbar=dict(title="u", x=0.30, len=0.8),
+        ), row=1, col=1)
+
+        fig.add_trace(go.Surface(
+            **common_surface_kw, z=U_exact,
+            cmin=-vmax, cmax=vmax,
+            colorbar=dict(title="u", x=0.63, len=0.8),
+        ), row=1, col=2)
+
+        fig.add_trace(go.Surface(
+            x=tv, y=xv, z=E_log,
+            colorscale="inferno",
+            colorbar=dict(title="log₁₀|e|", x=0.99, len=0.8),
+            name="Erro",
+        ), row=1, col=3)
+
+        scene_kw = dict(xaxis_title="t", yaxis_title="x")
+        fig.update_layout(
+            title=title,
+            scene=dict(**scene_kw, zaxis_title="u"),
+            scene2=dict(**scene_kw, zaxis_title="u"),
+            scene3=dict(**scene_kw, zaxis_title="log₁₀|e|"),
+            margin=dict(l=0, r=0, t=60, b=0),
+            height=600,
+        )
+
+    if savefig:
+        fig.write_html(savefig, include_plotlyjs=True, full_html=True)

@@ -302,11 +302,13 @@ class Trainer:
         self.history["loss_phys"].append(lp.item())
 
     # ── Adam ────────────────────────────────
-    def train_adam(self, verbose: bool = True) -> None:
+    def train_adam(self, verbose: bool = True, on_epoch_end: Optional[Callable] = None) -> None:
         cfg = self.cfg
         opt = torch.optim.Adam(self.model.parameters(), lr=cfg.lr_adam)
-        sched = torch.optim.lr_scheduler.StepLR(
-            opt, step_size=max(1, cfg.epochs_adam // 2), gamma=0.1
+        # CosineAnnealingLR: decai suavemente de lr_adam até lr_min=lr_adam/100
+        # ao longo de todo o treinamento Adam — mais principiado para paper que StepLR.
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt, T_max=cfg.epochs_adam, eta_min=cfg.lr_adam * 1e-2
         )
         log_every = max(1, cfg.epochs_adam // 10)
 
@@ -322,6 +324,9 @@ class Trainer:
             opt.step()
             sched.step()
             self._record(loss, ld, lp)
+
+            if on_epoch_end and ep % max(1, cfg.epochs_adam // 100) == 0:
+                on_epoch_end(ep, cfg.epochs_adam, loss.item())
 
             if verbose and ep % log_every == 0:
                 print(f"{ep:<8} {loss.item():<14.4e} {ld.item():<14.4e} {lp.item():<14.4e}")
@@ -354,10 +359,12 @@ class Trainer:
             print(f"[L-BFGS] final → {self.history['loss'][-1]:.4e}\n")
 
     # ── pipeline ────────────────────────────
-    def train(self, verbose: bool = True) -> None:
+    def train(self, verbose: bool = True, on_epoch_end: Optional[Callable] = None) -> None:
         torch.manual_seed(self.cfg.seed)
-        self.train_adam(verbose=verbose)
+        self.train_adam(verbose=verbose, on_epoch_end=on_epoch_end)
         if self.cfg.epochs_lbfgs > 0:
+            if on_epoch_end:
+                on_epoch_end(-1, self.cfg.epochs_lbfgs, -1)  # Signal: L-BFGS started
             self.train_lbfgs(verbose=verbose)
         self.model.eval()
 
@@ -391,13 +398,16 @@ class Analyzer:
 
     # ── resíduo em grade ─────────────────────
     def residual_grid(self, t_val: float, N: int = 512) -> np.ndarray:
+        """
+        Avalia o resíduo da EDP em grade uniforme sem alterar o modo do modelo.
+        torch.enable_grad() garante que autodiferentição funcione mesmo se
+        chamado dentro de um bloco torch.no_grad().
+        """
         cfg = self.cfg
         x = torch.linspace(cfg.x_min, cfg.x_max, N).reshape(-1, 1).to(DEVICE)
         t = torch.full_like(x, t_val)
-        self.model.train()
         with torch.enable_grad():
             r = self.residual_fn(self.model, x, t).detach().cpu().numpy().ravel()
-        self.model.eval()
         return r
 
     # ── FFT do resíduo ────────────────────────
@@ -413,11 +423,12 @@ class Analyzer:
         amps = np.abs(R) / N
         return freqs, amps
 
-    # ── viscosidade numérica estimada ─────────
-    def nu_numerical(self, t_val: float, N: int = 512) -> float:
+    # ── análise espectral profunda (Modified Equation) ──
+    def deep_spectral_analysis(self, t_val: float, N: int = 512) -> dict:
         """
-        Estima ν_num da equação modificada neural via:
-            ν_num ≈ median{ |R(k)| / (k² |Û(k)|) }
+        Realiza a análise de Fourier profunda do resíduo para encontrar
+        a difusão numérica (nu_num) e dispersão numérica (mu_num).
+        Retorna dicionário com vetores e coeficientes para plotagem.
         """
         cfg = self.cfg
         x = torch.linspace(cfg.x_min, cfg.x_max, N).reshape(-1, 1).to(DEVICE)
@@ -428,32 +439,70 @@ class Analyzer:
             u = self.model(x, t).cpu().numpy().ravel()
 
         dx = (cfg.x_max - cfg.x_min) / N
-        R = np.fft.rfft(r)
-        Uhat = np.fft.rfft(u)
-        k = 2 * np.pi * np.fft.rfftfreq(N, d=dx)
+        R = np.fft.fft(r)
+        Uhat = np.fft.fft(u)
+        k = 2 * np.pi * np.fft.fftfreq(N, d=dx)
 
-        mask = (k > 0) & (np.abs(Uhat) > 1e-10)
-        if not mask.any():
-            return 0.0
-        return float(np.median(np.abs(R[mask]) / (k[mask] ** 2 * np.abs(Uhat[mask]))))
+        # Frequências positivas apenas e ignorar k=0
+        mask = (k > 0) & (k < np.max(k)/2)
+        k_pos = k[mask]
+        R_pos = R[mask]
+        U_pos = Uhat[mask]
+
+        # Evitar divisão por zero na função de transferência
+        valid = np.abs(U_pos) > 1e-6
+        k_v = k_pos[valid]
+        H_v = R_pos[valid] / U_pos[valid]
+
+        if len(k_v) > 2:
+            # Re(H) = -nu * k^2 => nu = -Re(H) / k^2
+            x_nu = k_v**2
+            y_nu = np.real(H_v)
+            nu_num = -np.sum(x_nu * y_nu) / (np.sum(x_nu**2) + 1e-12)
+
+            # Im(H) = -mu * k^3 => mu = -Im(H) / k^3
+            x_mu = k_v**3
+            y_mu = np.imag(H_v)
+            mu_num = -np.sum(x_mu * y_mu) / (np.sum(x_mu**2) + 1e-12)
+        else:
+            nu_num = 0.0
+            mu_num = 0.0
+
+        return {
+            'k': k_pos,
+            'U_mag': np.abs(U_pos),
+            'R_mag': np.abs(R_pos),
+            'k_valid': k_v,
+            'H_real': np.real(H_v),
+            'H_imag': np.imag(H_v),
+            'nu_num': float(nu_num),
+            'mu_num': float(mu_num)
+        }
+
+    def nu_numerical(self, t_val: float, N: int = 512) -> float:
+        return self.deep_spectral_analysis(t_val, N)['nu_num']
+
+    def mu_numerical(self, t_val: float, N: int = 512) -> float:
+        return self.deep_spectral_analysis(t_val, N)['mu_num']
 
     # ── diagnóstico textual ───────────────────
     def diagnose(self, t_val: float, N: int = 512) -> str:
-        freqs, amps = self.fft_residual(t_val, N)
-        total = np.sum(amps ** 2)
-        if total < 1e-14:
-            return f"t={t_val:.2f} | Resíduo ≈ 0 → PINN convergiu bem."
+        res = self.deep_spectral_analysis(t_val, N)
+        if np.sum(res['R_mag']**2) < 1e-14:
+            return f"t={t_val:.2f} | Resíduo ≈ 0 → PINN convergiu perfeitamente."
 
-        mid = len(freqs) // 2
-        low = np.sum(amps[:mid] ** 2)
-        high = np.sum(amps[mid:] ** 2)
-        nu_est = self.nu_numerical(t_val, N)
-        tipo = "Difusão Numérica" if low > 5 * high else "Dispersão Numérica"
-
+        nu = res['nu_num']
+        mu = res['mu_num']
+        
+        # Comparação rudimentar baseada nos coeficientes da Equação Modificada Neural
+        # Em problemas físicos típicos, se o efeito de difusão domina o erro, nu é maior.
+        # Caso contrário, dispersão. (Note que eles têm unidades diferentes de k, então a análise espectral é o que importa).
+        tipo = "Difusão" if abs(nu) > abs(mu)*10 else "Dispersão"
+        
         return (
-            f"t={t_val:.2f} | {tipo} dominante\n"
-            f"  ν_num ≈ {nu_est:.3e} | "
-            f"E_baixa={low:.3e} | E_alta={high:.3e}"
+            f"t={t_val:.2f} | Erro dominado por: {tipo}\n"
+            f"  Difusão (ν_num) ≈ {nu:.3e}\n"
+            f"  Dispersão (μ_num) ≈ {mu:.3e}"
         )
 
     # ── energia L² ────────────────────────────
@@ -480,3 +529,73 @@ class Analyzer:
         energias = np.array([self.l2_energy(tv, N_grid) for tv in t_vals])
         cotas = np.array([self.gronwall_bound(tv, norm_a_C1, N_grid) for tv in t_vals])
         return t_vals, energias, cotas
+
+    # ── comparação com solução exata ──────────
+    def compute_error_metrics(
+        self,
+        exact_fn: Callable,
+        t_vals: Optional[List[float]] = None,
+        N: int = 512,
+    ) -> Dict:
+        """
+        Computa erros L² relativo e L∞ pontual em cada instante de t_vals,
+        comparando a predição da PINN com a solução analítica exact_fn.
+
+        Parâmetros
+        ----------
+        exact_fn : callable (x_np, t_val) → u_np
+        t_vals   : instantes de avaliação (padrão: 20 pontos em [t_min, t_max])
+        N        : pontos na grade espacial
+
+        Retorna
+        -------
+        dict com:
+          "t_vals"    : array de instantes avaliados
+          "l2_rel"    : erro L² relativo em cada instante
+          "linf"      : erro L∞ pontual em cada instante
+          "l2_max"    : pior erro L² relativo (escalar)
+          "linf_max"  : pior erro L∞ (escalar)
+          "x_grid"    : grade espacial usada (para reuso nos plots)
+        """
+        cfg = self.cfg
+        if t_vals is None:
+            t_vals = list(np.linspace(cfg.t_min, cfg.t_max, 20))
+
+        x_np = np.linspace(cfg.x_min, cfg.x_max, N)
+        x_t = torch.tensor(x_np, dtype=torch.float32).reshape(-1, 1).to(DEVICE)
+
+        l2_rel_list: List[float] = []
+        linf_list: List[float] = []
+
+        for tv in t_vals:
+            # Predição da PINN
+            t_t = torch.full_like(x_t, tv)
+            with torch.no_grad():
+                u_pred = self.model(x_t, t_t).cpu().numpy().ravel()
+
+            # Solução exata
+            u_exact = exact_fn(x_np, tv)
+
+            # Erro pontual
+            err = np.abs(u_pred - u_exact)
+
+            # L² relativo: ||u_pred - u_exact||_L2 / ||u_exact||_L2
+            norm_exact = np.sqrt(np.trapezoid(u_exact ** 2, x_np))
+            norm_err   = np.sqrt(np.trapezoid(err ** 2, x_np))
+            l2_rel = norm_err / (norm_exact + 1e-14)
+
+            l2_rel_list.append(float(l2_rel))
+            linf_list.append(float(err.max()))
+
+        t_arr    = np.array(t_vals)
+        l2_arr   = np.array(l2_rel_list)
+        linf_arr = np.array(linf_list)
+
+        return {
+            "t_vals":   t_arr,
+            "l2_rel":   l2_arr,
+            "linf":     linf_arr,
+            "l2_max":   float(l2_arr.max()),
+            "linf_max": float(linf_arr.max()),
+            "x_grid":   x_np,
+        }

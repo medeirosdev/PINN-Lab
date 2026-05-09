@@ -490,7 +490,126 @@ def exact_burgers_shock(
 
 
 # ═══════════════════════════════════════════════════════════════
-#  6. CATÁLOGO (dicionário com todas as funções pré-configuradas)
+#  6. SOLUÇÃO EXATA — BURGERS VISCOSA (Cole-Hopf)
+# ═══════════════════════════════════════════════════════════════
+
+def exact_burgers_viscous_neg_sine(
+    nu: float,
+    N_quad: int = 2000,
+) -> Callable[[np.ndarray, float], np.ndarray]:
+    """
+    Solução exata da Burgers viscosa  u_t + (u²/2)_x = ν u_xx
+    para condição inicial  u(x, 0) = −sin(πx),  x ∈ [−1, 1].
+
+    Implementação via fórmula integral de Cole-Hopf:
+
+        u(x,t) = ∫(x−y)/t · exp(Ψ) dy / ∫ exp(Ψ) dy
+
+    onde  Ψ(y; x, t) = −Φ(y)/(2ν) − (x−y)²/(4νt),
+          Φ(y) = ∫₀ʸ u₀(s) ds = (cos(πy)−1)/π.
+
+    A constante exp(Ψ_max) é fatorada (logsumexp) antes de avaliar
+    as somas, garantindo estabilidade numérica para qualquer ν > 0.
+
+    Referência: Hopf (1950), Cole (1951); benchmark em Raissi et al. (2019).
+
+    Parâmetros
+    ----------
+    nu     : viscosidade cinemática (deve ser > 0)
+    N_quad : pontos de quadratura na grade y ∈ [−1, 1] (padrão 2000)
+
+    Retorna callable (x_np, t_val) → u_np  compatível com o restante da lib.
+    """
+    # Grade de quadratura fixa — pré-computada uma única vez
+    y_quad = np.linspace(-1.0, 1.0, N_quad)           # (N_quad,)
+    dy = y_quad[1] - y_quad[0]
+
+    # Primitiva de u₀(y) = −sin(πy):  Φ(y) = (cos(πy) − 1) / π
+    Phi = (np.cos(np.pi * y_quad) - 1.0) / np.pi     # (N_quad,)
+
+    def fn(x: np.ndarray, t: float) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float64)
+
+        # Condição inicial: limite exato para t → 0
+        if t < 1e-10:
+            return -np.sin(np.pi * x)
+
+        # diff[i,j] = x[i] − y[j],  shape (Nx, N_quad)
+        diff = x[:, None] - y_quad[None, :]
+
+        # Expoente: Ψ(y; x_i, t) = −Φ(y)/(2ν) − diff²/(4νt)
+        psi = -Phi[None, :] / (2.0 * nu) - diff**2 / (4.0 * nu * t)
+
+        # Estabilização numérica: subtrai o máximo por linha (cancela no ratio)
+        psi_max = psi.max(axis=1, keepdims=True)      # (Nx, 1)
+        w = np.exp(psi - psi_max)                     # (Nx, N_quad)
+
+        # Regra do trapézio (dy uniforme, pontos de borda com peso 0.5)
+        w[:, 0]  *= 0.5
+        w[:, -1] *= 0.5
+
+        numer = np.sum(diff * w, axis=1)              # (Nx,)
+        denom = np.sum(w, axis=1)                     # (Nx,)
+
+        return numer / (t * (denom + 1e-300))
+
+    return fn
+
+
+# ═══════════════════════════════════════════════════════════════
+#  7. ROTEADOR DE SOLUÇÕES EXATAS
+# ═══════════════════════════════════════════════════════════════
+
+def get_exact_fn(
+    model_type: str,
+    u0_name: str,
+    a_velocity: float = 1.0,
+    nu_viscosity: float = 0.01 / np.pi,
+    u0_fn: Optional[Callable] = None,
+) -> Tuple[Optional[Callable], bool]:
+    """
+    Devolve (exact_fn, has_exact) para cada combinação de EDP + CI.
+
+    exact_fn : callable (x_np, t_val) → u_np,  ou None
+    has_exact: True quando a solução analítica existe e foi implementada
+
+    Parâmetros
+    ----------
+    u0_fn : função u₀ real usada no treinamento (necessária para advecção
+            quando a CI tem parâmetros customizados, e.g. gaussiana deslocada).
+            Se None, usa o catálogo padrão.
+
+    Combinações suportadas
+    ----------------------
+    advection_linear  + qualquer CI do catálogo (ou u0_fn explícita)
+    burgers_inviscid  + riemann_shock
+    burgers_inviscid  + riemann_rarefaction
+    burgers_viscous   + neg_sine
+    """
+    if model_type == "advection_linear":
+        # Prioridade: u0_fn explícita → catálogo
+        fn = u0_fn if u0_fn is not None else catalog.get(u0_name)
+        if fn is None:
+            return None, False
+        return exact_advection(fn, a=a_velocity), True
+
+    if model_type == "burgers_inviscid":
+        if u0_name == "riemann_shock":
+            # u_L=1, u_R=0  →  choque, velocidade s=0.5
+            return exact_burgers_shock(u_left=1.0, u_right=0.0, x0=0.0), True
+        if u0_name == "riemann_rarefaction":
+            # u_L=-1, u_R=1  →  leque de rarefação simétrico
+            return exact_burgers_rarefaction(u_left=-1.0, u_right=1.0, x0=0.0), True
+
+    if model_type == "burgers_viscous" and u0_name == "neg_sine":
+        nu = nu_viscosity if nu_viscosity is not None else 0.01 / np.pi
+        return exact_burgers_viscous_neg_sine(nu=nu), True
+
+    return None, False
+
+
+# ═══════════════════════════════════════════════════════════════
+#  8. CATÁLOGO (dicionário com todas as funções pré-configuradas)
 # ═══════════════════════════════════════════════════════════════
 
 catalog: Dict[str, ICFunc] = {
