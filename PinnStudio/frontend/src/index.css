@@ -480,6 +480,7 @@ input[type=number] {
   letter-spacing: 0.05em;
 }
 
+.status-QUEUED { background-color: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
 .status-RUNNING { background-color: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
 .status-COMPLETED { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
 .status-FAILED { background-color: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
@@ -733,4 +734,25 @@ summary::marker {
   .analytics-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.image-label {
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent-color);
+}
+
+.image-label strong {
+  color: var(--accent-hover);
+}
+
+@keyframes pulseBar {
+  0%   { transform: translateX(-100%); opacity: 0.6; }
+  50%  { opacity: 1; }
+  100% { transform: translateX(250%); opacity: 0.6; }
 }

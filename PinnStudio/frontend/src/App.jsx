@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Activity, Play, RefreshCw, BarChart2, Layers, Trash2, Home, BookOpen, MonitorPlay, Save, PieChart } from 'lucide-react';
+import { Activity, Play, RefreshCw, BarChart2, Layers, Trash2, Home, BookOpen, MonitorPlay, Save, PieChart, Info, Link, Download, FlaskConical } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ScatterChart, Scatter, ZAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
 import './index.css';
 
@@ -48,7 +48,8 @@ function App() {
     n_neurons: 40,
     epochs_adam: 2000,
     epochs_lbfgs: 500,
-    lr_adam: 0.001
+    lr_adam: 0.001,
+    n_collocation: 8000
   });
 
   const fetchExperiments = async () => {
@@ -96,9 +97,82 @@ function App() {
     }
   };
 
+  const [progress, setProgress] = useState({});
+
+  const fetchProgress = async () => {
+    try {
+      const res = await fetch(`${API_URL}/progress`);
+      if (res.ok) setProgress(await res.json());
+    } catch (err) { /* silently ignore */ }
+  };
+
+  // ── Batch state ──────────────────────────────────────────────────────────────
+  const [batches, setBatches] = useState([]);
+  const [selectedBatch, setSelectedBatch] = useState(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchFormData, setBatchFormData] = useState({
+    model_type: 'advection_linear',
+    a_velocity: 1.0,
+    nu_viscosity: 0.00318,
+    x_min: -1.0, x_max: 1.0,
+    t_min: 0.0, t_max: 1.0,
+    u0_name: 'neg_sine',
+    u0_params: {},
+    n_layers: 4, n_neurons: 40,
+    activation: 'tanh',
+    epochs_adam: 2000, epochs_lbfgs: 500,
+    lr_adam: 0.001, n_collocation: 8000,
+    n_seeds: 5,
+  });
+
+  const fetchBatches = async () => {
+    try {
+      const res = await fetch(`${API_URL}/batches`);
+      if (res.ok) setBatches(await res.json());
+    } catch (err) { /* silently ignore */ }
+  };
+
+  const INT_BATCH = new Set(['n_layers', 'n_neurons', 'epochs_adam', 'epochs_lbfgs', 'n_collocation', 'n_seeds']);
+  const handleBatchChange = (e) => {
+    const { name, value, type } = e.target;
+    let parsed = value;
+    if (type === 'number') parsed = INT_BATCH.has(name) ? parseInt(value, 10) : Number(value);
+    setBatchFormData(prev => ({ ...prev, [name]: parsed }));
+  };
+
+  const handleBatchSubmit = async (e) => {
+    e.preventDefault();
+    setBatchLoading(true);
+    try {
+      await fetch(`${API_URL}/batches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batchFormData),
+      });
+      fetchBatches();
+      fetchExperiments();
+    } catch (err) { console.error(err); }
+    setBatchLoading(false);
+  };
+
+  const deleteBatch = async (id) => {
+    try {
+      await fetch(`${API_URL}/batches/${id}`, { method: 'DELETE' });
+      fetchBatches();
+      fetchExperiments();
+      if (selectedBatch?.id === id) setSelectedBatch(null);
+    } catch (err) { console.error(err); }
+  };
+
   useEffect(() => {
     fetchExperiments();
-    const interval = setInterval(fetchExperiments, 5000); // Auto refresh
+    fetchProgress();
+    fetchBatches();
+    const interval = setInterval(() => {
+      fetchExperiments();
+      fetchProgress();
+      fetchBatches();
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -109,12 +183,14 @@ function App() {
     return true;
   });
 
+  const INT_FIELDS = new Set(['n_layers', 'n_neurons', 'epochs_adam', 'epochs_lbfgs', 'n_collocation']);
   const handleChange = (e) => {
     const { name, value, type } = e.target;
-    setFormData({
-      ...formData,
-      [name]: type === 'number' ? Number(value) : value
-    });
+    let parsed = value;
+    if (type === 'number') {
+      parsed = INT_FIELDS.has(name) ? parseInt(value, 10) : Number(value);
+    }
+    setFormData({ ...formData, [name]: parsed });
   };
 
   const handleParamsChange = (e) => {
@@ -135,10 +211,7 @@ function App() {
       await fetch(`${API_URL}/experiments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          u0_params: {}, // Simplify for now
-        })
+        body: JSON.stringify(formData)
       });
       fetchExperiments();
     } catch (err) {
@@ -160,7 +233,10 @@ function App() {
           <span className={`nav-link ${currentRoute === 'studio' ? 'active' : ''}`} onClick={() => setCurrentRoute('studio')}>Lab</span>
           <span className={`nav-link ${currentRoute === 'experiments' ? 'active' : ''}`} onClick={() => setCurrentRoute('experiments')}>Experimentos</span>
           <span className={`nav-link ${currentRoute === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentRoute('analytics')}>Dados Gerais</span>
+          <span className={`nav-link ${currentRoute === 'batches' ? 'active' : ''}`} onClick={() => setCurrentRoute('batches')}>Batch</span>
           <span className={`nav-link ${currentRoute === 'manual' ? 'active' : ''}`} onClick={() => setCurrentRoute('manual')}>Manual</span>
+          <span className={`nav-link ${currentRoute === 'rawdata' ? 'active' : ''}`} onClick={() => setCurrentRoute('rawdata')}>Dados Brutos</span>
+          <span className={`nav-link ${currentRoute === 'sobre' ? 'active' : ''}`} onClick={() => setCurrentRoute('sobre')}>Sobre</span>
         </div>
       </nav>
 
@@ -191,6 +267,13 @@ function App() {
                 <div>
                   <h3>Dados Gerais (Analytics)</h3>
                   <p>Métricas globais de todos os modelos e arquiteturas.</p>
+                </div>
+              </div>
+              <div className="home-card" onClick={() => setCurrentRoute('batches')}>
+                <div className="icon-wrapper"><FlaskConical size={26} /></div>
+                <div>
+                  <h3>Batch / Reprodutibilidade</h3>
+                  <p>Múltiplas seeds com intervalo de confiança para o paper.</p>
                 </div>
               </div>
               <div className="home-card" onClick={() => setCurrentRoute('manual')}>
@@ -406,6 +489,11 @@ function App() {
                 <label>Épocas Otimizador (L-BFGS)</label>
                 <input type="number" step="100" name="epochs_lbfgs" value={formData.epochs_lbfgs} onChange={handleChange} />
               </div>
+
+              <div className="form-group">
+                <label>Pontos de Colocação (N_f)</label>
+                <input type="number" step="1000" min="500" name="n_collocation" value={formData.n_collocation} onChange={handleChange} />
+              </div>
             </div>
           </details>
 
@@ -429,6 +517,7 @@ function App() {
             <label>Status</label>
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
               <option value="ALL">Todos</option>
+              <option value="QUEUED">Na Fila</option>
               <option value="RUNNING">Em Andamento</option>
               <option value="COMPLETED">Concluídos</option>
               <option value="FAILED">Falhos</option>
@@ -508,7 +597,47 @@ function App() {
                 <p>U0: <span>{exp.u0_name}</span></p>
                 <p>Domínio: <span>x:[{exp.x_min}, {exp.x_max}], t:[{exp.t_min}, {exp.t_max}]</span></p>
                 <p>Rede: <span>{exp.n_layers}x{exp.n_neurons}</span></p>
+                <p>N_f: <span>{exp.n_collocation ?? 8000} pts colocação</span></p>
                 <p>LR: <span>{exp.lr_adam || '1e-3'}</span></p>
+                {exp.status === 'RUNNING' && progress[exp.id] && (() => {
+                  const p = progress[exp.id];
+                  const isAdam = p.phase === 'Adam';
+                  const pct = isAdam && p.total_epochs > 0 ? Math.round((p.epoch / p.total_epochs) * 100) : null;
+                  return (
+                    <div style={{marginTop: '15px', borderTop: '1px solid var(--border-color)', paddingTop: '12px'}}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '6px' }}>
+                        <span style={{color: 'var(--accent-hover)', fontWeight: 600}}>{p.phase}</span>
+                        {pct !== null ? (
+                          <span style={{color: '#fff'}}>{p.epoch}/{p.total_epochs} ({pct}%)</span>
+                        ) : (
+                          <span style={{color: '#a78bfa', fontStyle: 'italic'}}>processando...</span>
+                        )}
+                      </div>
+                      <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                        {pct !== null ? (
+                          <div style={{
+                            width: `${pct}%`, height: '100%',
+                            background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)',
+                            borderRadius: '3px',
+                            transition: 'width 0.5s ease-out'
+                          }} />
+                        ) : (
+                          <div style={{
+                            width: '40%', height: '100%',
+                            background: 'linear-gradient(90deg, #8b5cf6, #3b82f6, #8b5cf6)',
+                            borderRadius: '3px',
+                            animation: 'pulseBar 1.5s ease-in-out infinite'
+                          }} />
+                        )}
+                      </div>
+                      {p.loss !== null && p.loss !== undefined && (
+                        <p style={{ marginTop: '8px', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                          Loss: <strong style={{color: '#ef4444'}}>{p.loss.toExponential(4)}</strong>
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
                 {exp.status === 'COMPLETED' && (
                   <div style={{marginTop: '15px'}}>
                     <p style={{borderTop: '1px solid var(--border-color)', paddingTop: '10px'}}>Loss Final: <span>{exp.loss_final?.toExponential(4)}</span></p>
@@ -520,7 +649,7 @@ function App() {
                         style={{width: '100%', marginTop: '15px', backgroundColor: 'transparent', border: '1px solid var(--accent-color)', color: 'var(--accent-color)'}}
                         onClick={() => setSelectedExp(exp)}
                       >
-                        Abrir Análise Detalhada
+                        Abrir Analise Detalhada
                       </button>
                     )}
                   </div>
@@ -650,8 +779,10 @@ function App() {
                         <th style={{ padding: '10px' }}>Condição Inicial</th>
                         <th style={{ padding: '10px' }}>Rede</th>
                         <th style={{ padding: '10px' }}>Loss Final</th>
-                        <th style={{ padding: '10px' }}>Erro L2</th>
+                        <th style={{ padding: '10px' }}>Erro L²</th>
+                        <th style={{ padding: '10px' }}>Erro L∞</th>
                         <th style={{ padding: '10px' }}>Difusão Num.</th>
+                        <th style={{ padding: '10px' }}>Dispersão Num.</th>
                         <th style={{ padding: '10px' }}>Tempo</th>
                       </tr>
                     </thead>
@@ -664,7 +795,9 @@ function App() {
                           <td style={{ padding: '10px' }}>{exp.n_layers}x{exp.n_neurons}</td>
                           <td style={{ padding: '10px', color: '#ef4444' }}>{exp.loss_final?.toExponential(4)}</td>
                           <td style={{ padding: '10px', color: '#10b981' }}>{exp.l2_error ? exp.l2_error.toExponential(4) : '-'}</td>
+                          <td style={{ padding: '10px', color: '#34d399' }}>{exp.linf_error ? exp.linf_error.toExponential(4) : '-'}</td>
                           <td style={{ padding: '10px', color: 'var(--accent-hover)' }}>{exp.nu_numerical ? exp.nu_numerical.toExponential(4) : '-'}</td>
+                          <td style={{ padding: '10px', color: '#f59e0b' }}>{exp.mu_numerical ? exp.mu_numerical.toExponential(4) : '-'}</td>
                           <td style={{ padding: '10px' }}>{exp.time_taken_sec ? exp.time_taken_sec.toFixed(1) + 's' : '-'}</td>
                         </tr>
                       ))}
@@ -680,37 +813,77 @@ function App() {
       {currentRoute === 'compare' && (
         <div style={{ padding: '40px', overflowY: 'auto', flex: 1, color: 'var(--text-primary)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-            <h1 style={{ color: '#fff' }}><BarChart2 style={{display:'inline', marginRight:'10px'}}/> Comparação de Experimentos</h1>
+            <h1 style={{ color: '#fff' }}><BarChart2 style={{display:'inline', marginRight:'10px'}}/> Comparacao A/B Visual</h1>
             <button className="btn-close" onClick={() => setCurrentRoute('experiments')}>Voltar para Experimentos</button>
           </div>
 
+          {/* Cards de Metricas lado a lado */}
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedExperimentsData.length}, 1fr)`, gap: '20px', marginBottom: '30px' }}>
-            {selectedExperimentsData.map(exp => (
-              <div key={exp.id} className="card" style={{ padding: '20px' }}>
-                <h3 style={{ color: 'var(--accent-color)', marginBottom: '15px' }}>Experimento #{exp.id}</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.9rem', marginBottom: '15px' }}>
-                  <p style={{color: 'var(--text-muted)'}}>Física: <strong style={{color:'#fff'}}>{exp.model_type}</strong></p>
-                  <p style={{color: 'var(--text-muted)'}}>u0: <strong style={{color:'#fff'}}>{exp.u0_name}</strong></p>
-                  <p style={{color: 'var(--text-muted)'}}>Rede: <strong style={{color:'#fff'}}>{exp.n_layers}x{exp.n_neurons}</strong></p>
-                  <p style={{color: 'var(--text-muted)'}}>Épocas: <strong style={{color:'#fff'}}>{exp.epochs_adam} + {exp.epochs_lbfgs}</strong></p>
-                </div>
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Loss Total:</span> <strong style={{color: '#ef4444'}}>{exp.loss_final?.toExponential(4) || 'N/A'}</strong></p>
-                  <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Erro L2:</span> <strong style={{color: '#10b981'}}>{exp.l2_error ? exp.l2_error.toExponential(4) : 'N/A'}</strong></p>
-                  <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tempo (s):</span> <strong>{exp.time_taken_sec ? exp.time_taken_sec.toFixed(1) : 'N/A'}</strong></p>
-                </div>
-                {exp.results_dir && (
-                  <div style={{ marginTop: '20px', borderRadius: '8px', overflow: 'hidden' }}>
-                    <p style={{textAlign:'center', fontSize:'0.85rem', marginBottom:'5px', color:'var(--text-muted)'}}>Superfície 3D</p>
-                    <img src={`${API_URL}/results/${exp.results_dir.split('/').pop()}/animation_3d.gif`} alt="3D" style={{ width: '100%', borderRadius: '8px' }} />
+            {selectedExperimentsData.map((exp, idx) => {
+              const colors = ['#3b82f6', '#ef4444', '#10b981'];
+              const c = colors[idx % colors.length];
+              return (
+                <div key={exp.id} className="card" style={{ padding: '20px', borderTop: `3px solid ${c}` }}>
+                  <h3 style={{ color: c, marginBottom: '15px' }}>Experimento #{exp.id}</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.85rem', marginBottom: '15px' }}>
+                    <p style={{color: 'var(--text-muted)'}}>Fisica: <strong style={{color:'#fff'}}>{exp.model_type}</strong></p>
+                    <p style={{color: 'var(--text-muted)'}}>u0: <strong style={{color:'#fff'}}>{exp.u0_name}</strong></p>
+                    <p style={{color: 'var(--text-muted)'}}>Rede: <strong style={{color:'#fff'}}>{exp.n_layers}x{exp.n_neurons}</strong></p>
+                    <p style={{color: 'var(--text-muted)'}}>Ativacao: <strong style={{color:'#fff'}}>{exp.activation}</strong></p>
+                    <p style={{color: 'var(--text-muted)'}}>Epocas: <strong style={{color:'#fff'}}>{exp.epochs_adam} + {exp.epochs_lbfgs}</strong></p>
+                    <p style={{color: 'var(--text-muted)'}}>LR: <strong style={{color:'#fff'}}>{exp.lr_adam}</strong></p>
                   </div>
-                )}
-              </div>
-            ))}
+                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.9rem' }}>
+                    <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Loss Total:</span> <strong style={{color: '#ef4444'}}>{exp.loss_final?.toExponential(4) || 'N/A'}</strong></p>
+                    <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Erro L2:</span> <strong style={{color: '#10b981'}}>{exp.l2_error ? exp.l2_error.toExponential(4) : 'N/A'}</strong></p>
+                    <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Erro Linf:</span> <strong style={{color: '#34d399'}}>{exp.linf_error ? exp.linf_error.toExponential(4) : 'N/A'}</strong></p>
+                    <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Difusao (nu):</span> <strong style={{color: 'var(--accent-hover)'}}>{exp.nu_numerical ? exp.nu_numerical.toExponential(3) : 'N/A'}</strong></p>
+                    <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dispersao (mu):</span> <strong style={{color: '#f59e0b'}}>{exp.mu_numerical ? exp.mu_numerical.toExponential(3) : 'N/A'}</strong></p>
+                    <p style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tempo:</span> <strong>{exp.time_taken_sec ? exp.time_taken_sec.toFixed(1) + 's' : 'N/A'}</strong></p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
+          {/* Comparacao visual lado a lado */}
+          {[
+            { title: 'Animacao Temporal', file: 'animation.gif', label: 'Evolucao de u(x) ao longo do tempo' },
+            { title: 'Superficie 3D', file: 'animation_3d.gif', label: 'Perspectiva tridimensional u(x,t)' },
+            { title: 'Dashboard Completo', file: 'dashboard.png', label: 'Heatmap + Loss + Residuo + Fourier' },
+            { title: 'Slices Temporais', file: 'slices.png', label: 'Perfis u(x) em diferentes instantes t' },
+            { title: 'Analise Espectral (Fourier)', file: 'spectral.png', label: 'Diagnostico de Difusao e Dispersao Numerica' },
+          ].map(item => (
+            <div key={item.file} className="card" style={{ padding: '25px', marginBottom: '20px' }}>
+              <h3 style={{ marginBottom: '5px' }}>{item.title}</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '15px' }}>{item.label}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedExperimentsData.length}, 1fr)`, gap: '15px' }}>
+                {selectedExperimentsData.map((exp, idx) => {
+                  const colors = ['#3b82f6', '#ef4444', '#10b981'];
+                  return (
+                    <div key={exp.id} style={{ textAlign: 'center' }}>
+                      <p style={{ fontSize: '0.85rem', fontWeight: 600, color: colors[idx % colors.length], marginBottom: '8px' }}>Exp #{exp.id} ({exp.n_layers}x{exp.n_neurons})</p>
+                      {exp.results_dir ? (
+                        <img
+                          src={`${API_URL}/results/${exp.results_dir.split('/').pop()}/${item.file}`}
+                          alt={`${item.title} - Exp ${exp.id}`}
+                          style={{ width: '100%', borderRadius: '8px', border: `1px solid ${colors[idx % colors.length]}30` }}
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <p style={{ color: 'var(--text-muted)', padding: '40px' }}>Sem resultados</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* Curvas de Loss sobrepostas */}
           <div className="card" style={{ padding: '30px' }}>
-            <h3 style={{ marginBottom: '20px' }}>Curvas de Convergência (Loss History)</h3>
+            <h3 style={{ marginBottom: '5px' }}>Curvas de Convergencia (Loss Sobrepostas)</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '15px' }}>Comparacao direta da velocidade de convergencia entre os experimentos</p>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
               <img 
                 src={`${API_URL}/compare/loss?ids=${selectedForCompare.join(',')}`} 
@@ -745,7 +918,7 @@ function App() {
                 <div style={{flex: 1, minWidth: '200px'}}>
                   <p style={{margin: '0 0 5px 0', color: 'var(--text-muted)', fontSize: '0.85rem'}}>Rede</p>
                   <p style={{margin: 0, fontSize: '1rem', fontWeight: 500}}>
-                    {selectedExp.n_layers} Camadas × {selectedExp.n_neurons} Neurônios
+                    {selectedExp.n_layers} camadas × {selectedExp.n_neurons} neurônios · N_f={selectedExp.n_collocation ?? 8000}
                   </p>
                 </div>
                 <div style={{flex: 1, minWidth: '200px'}}>
@@ -773,21 +946,517 @@ function App() {
                 <div className="modal-image-card">
                   <h3>Dashboard Geral</h3>
                   <img src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/dashboard.png`} alt="Dashboard" />
+                  <p className="image-label">Visão integrada. <strong>Eixos:</strong> $x$ (espaço) vs $t$ (tempo) no mapa; Época vs Loss no treino; $k$ (freq) vs Amplitude no espectro.</p>
                 </div>
                 <div className="modal-image-card">
                   <h3>Animação (Tempo Real)</h3>
                   <img src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/animation.gif`} alt="Animação GIF" />
+                  <p className="image-label">Evolução temporal. <strong>Eixos:</strong> $x$ (espaço) vs $u$ (solução). A animação percorre o eixo $t$ de $0$ a $T_{'{'}max{'}'}$.</p>
                 </div>
                 <div className="modal-image-card">
                   <h3>Superfície 3D (Animada)</h3>
                   <img src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/animation_3d.gif`} alt="Superfície 3D Animada" />
+                  <p className="image-label">Perspectiva tridimensional. <strong>Eixos:</strong> $t$ (tempo), $x$ (espaço) e profundidade $u$ (amplitude da solução).</p>
                 </div>
                 <div className="modal-image-card">
                   <h3>Evolução da Solução (Slices)</h3>
                   <img src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/slices.png`} alt="Slices Temporais" />
+                  <p className="image-label">Perfis temporais fixos. <strong>Eixos:</strong> $x$ (espaço) vs $u$ (solução) comparados em diferentes instantes $t$.</p>
+                </div>
+                <div className="modal-image-card" style={{ gridColumn: '1 / -1' }}>
+                  <h3>Diagnóstico Físico (Análise Espectral de Fourier)</h3>
+                  <img src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/spectral.png`} alt="Análise Espectral" />
+                  <p className="image-label">Decomposição do erro. <strong>Eixos:</strong> $k^2$ (escala quadrática para Difusão) e $k^3$ (escala cúbica para Dispersão Numérica).</p>
+                </div>
+              </div>
+
+              {/* Seção de comparação com solução exata — disponível apenas quando has_exact_solution=true */}
+              {selectedExp.has_exact_solution && (
+                <div style={{ marginTop: '30px' }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '14px 20px', marginBottom: '20px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    borderRadius: '10px',
+                  }}>
+                    <Activity size={20} color="#10b981" />
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, color: '#10b981' }}>Solução Exata Disponível</p>
+                      <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                        Erros calculados sobre toda a trajetória temporal.
+                        L² máx: <strong style={{color:'#10b981'}}>{selectedExp.l2_error?.toExponential(3) ?? '—'}</strong>
+                        &nbsp;·&nbsp;
+                        L∞ máx: <strong style={{color:'#34d399'}}>{selectedExp.linf_error?.toExponential(3) ?? '—'}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="modal-grid">
+                    <div className="modal-image-card" style={{ gridColumn: '1 / -1' }}>
+                      <h3>Painel de Comparação — PINN vs Solução Exata</h3>
+                      <img
+                        src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/comparison.png`}
+                        alt="Painel de Comparação"
+                      />
+                    </div>
+                    <div className="modal-image-card" style={{ gridColumn: '1 / -1' }}>
+                      <h3>Mapas de Calor: PINN | Exata | Erro Absoluto</h3>
+                      <img
+                        src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/error_heatmap.png`}
+                        alt="Mapa de Calor do Erro"
+                      />
+                    </div>
+                    <div className="modal-image-card" style={{ gridColumn: '1 / -1' }}>
+                      <h3>Evolução do Erro L²(t) e L∞(t)</h3>
+                      <img
+                        src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/error_curve.png`}
+                        alt="Curvas de Erro"
+                      />
+                    </div>
+                    <div className="modal-image-card" style={{ gridColumn: '1 / -1' }}>
+                      <h3>Superfícies 3D — PINN | Exata | |Erro|</h3>
+                      <img
+                        src={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/surface_3d_trio.png`}
+                        alt="Trio de Superfícies 3D"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Gráfico 3D interativo (Plotly) — sempre disponível após COMPLETED */}
+              <div style={{ marginTop: '30px' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '14px 20px', marginBottom: '20px',
+                  backgroundColor: 'rgba(139, 92, 246, 0.08)',
+                  borderRadius: '12px', border: '1px solid rgba(139, 92, 246, 0.2)',
+                }}>
+                  <span style={{ fontSize: '22px' }}>🖱️</span>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '1.15rem', color: '#8b5cf6' }}>
+                      Superfície 3D Interativa
+                    </h2>
+                    <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8' }}>
+                      Arraste para rotacionar · Scroll para zoom · Duplo clique para resetar vista
+                      {selectedExp.has_exact_solution && ' · Inclui PINN, Solução Exata e log₁₀|erro|'}
+                    </p>
+                  </div>
+                </div>
+                <object
+                  data={`${API_URL}/results/${selectedExp.results_dir.split('/').pop()}/surface_3d_interactive.html`}
+                  type="text/html"
+                  style={{
+                    width: '100%',
+                    height: '640px',
+                    border: 'none',
+                    borderRadius: '12px',
+                    background: '#0f172a',
+                    display: 'block',
+                  }}
+                >
+                  <div style={{
+                    height: '640px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: '12px', border: '1px dashed rgba(139,92,246,0.3)',
+                    color: '#64748b', flexDirection: 'column', gap: '8px',
+                  }}>
+                    <span style={{ fontSize: '2rem' }}>📊</span>
+                    <p style={{ margin: 0 }}>Gráfico interativo não disponível para este experimento.</p>
+                    <p style={{ margin: 0, fontSize: '0.8rem' }}>Execute um novo experimento para gerar a visualização.</p>
+                  </div>
+                </object>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* ── Rota Batch ──────────────────────────────────────────────────────── */}
+      {currentRoute === 'batches' && (
+        <div style={{ padding: '40px', overflowY: 'auto', flex: 1, color: 'var(--text-primary)', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+          <h1 style={{ marginBottom: '6px' }}>Batch — Reprodutibilidade</h1>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '30px', fontSize: '0.9rem' }}>
+            Roda N seeds com a mesma configuração e exibe média ± desvio padrão dos erros.
+          </p>
+
+          {/* Formulário de criação */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '28px', marginBottom: '32px' }}>
+            <h2 style={{ marginBottom: '20px', fontSize: '1.1rem' }}>Nova Rodada Batch</h2>
+            <form onSubmit={handleBatchSubmit}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+
+                <div className="form-group">
+                  <label>Equação</label>
+                  <select name="model_type" value={batchFormData.model_type} onChange={handleBatchChange}>
+                    <option value="advection_linear">Advecção Linear</option>
+                    <option value="burgers_viscous">Burgers Viscosa</option>
+                    <option value="burgers_inviscid">Burgers Invíscida</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Cond. Inicial (u₀)</label>
+                  <select name="u0_name" value={batchFormData.u0_name} onChange={handleBatchChange}>
+                    <option value="neg_sine">−sin(πx)</option>
+                    <option value="gaussian">Gaussiana</option>
+                    <option value="square">Quadrada</option>
+                  </select>
+                </div>
+
+                {batchFormData.model_type === 'advection_linear' && (
+                  <div className="form-group">
+                    <label>Velocidade a</label>
+                    <input type="number" step="0.1" name="a_velocity" value={batchFormData.a_velocity} onChange={handleBatchChange} />
+                  </div>
+                )}
+
+                {batchFormData.model_type !== 'advection_linear' && (
+                  <div className="form-group">
+                    <label>Viscosidade ν</label>
+                    <input type="number" step="0.001" name="nu_viscosity" value={batchFormData.nu_viscosity} onChange={handleBatchChange} />
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label>x mín / máx</label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input type="number" step="0.5" name="x_min" value={batchFormData.x_min} onChange={handleBatchChange} />
+                    <input type="number" step="0.5" name="x_max" value={batchFormData.x_max} onChange={handleBatchChange} />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Camadas × Neurônios</label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input type="number" min="1" max="10" name="n_layers" value={batchFormData.n_layers} onChange={handleBatchChange} />
+                    <input type="number" min="8" max="256" step="8" name="n_neurons" value={batchFormData.n_neurons} onChange={handleBatchChange} />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Ativação</label>
+                  <select name="activation" value={batchFormData.activation} onChange={handleBatchChange}>
+                    <option value="tanh">tanh</option>
+                    <option value="sin">sin</option>
+                    <option value="relu">relu</option>
+                    <option value="gelu">gelu</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Épocas Adam</label>
+                  <input type="number" step="500" min="100" name="epochs_adam" value={batchFormData.epochs_adam} onChange={handleBatchChange} />
+                </div>
+
+                <div className="form-group">
+                  <label>Épocas L-BFGS</label>
+                  <input type="number" step="100" min="0" name="epochs_lbfgs" value={batchFormData.epochs_lbfgs} onChange={handleBatchChange} />
+                </div>
+
+                <div className="form-group">
+                  <label>N coloc. (N_f)</label>
+                  <input type="number" step="1000" min="500" name="n_collocation" value={batchFormData.n_collocation} onChange={handleBatchChange} />
+                </div>
+
+                <div className="form-group" style={{ background: 'rgba(139,92,246,0.08)', borderRadius: '10px', padding: '12px', border: '1px solid rgba(139,92,246,0.25)' }}>
+                  <label style={{ color: '#8b5cf6', fontWeight: 700 }}>Número de Seeds (N)</label>
+                  <input type="number" min="2" max="20" name="n_seeds" value={batchFormData.n_seeds} onChange={handleBatchChange} style={{ borderColor: 'rgba(139,92,246,0.4)' }} />
+                  <small style={{ color: 'var(--text-muted)' }}>Cada seed = 1 run independente</small>
+                </div>
+              </div>
+
+              <button type="submit" className="btn-primary" disabled={batchLoading} style={{ marginTop: '20px', minWidth: '200px' }}>
+                {batchLoading ? 'Enfileirando...' : `Iniciar Batch (${batchFormData.n_seeds} seeds)`}
+              </button>
+            </form>
+          </div>
+
+          {/* Lista de batches */}
+          {batches.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+              <FlaskConical size={48} style={{ opacity: 0.3, marginBottom: '12px' }} />
+              <p>Nenhum batch criado ainda.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {batches.map(batch => {
+                const isExpanded = selectedBatch?.id === batch.id;
+                const pct = batch.n_seeds > 0 ? Math.round((batch.completed_runs / batch.n_seeds) * 100) : 0;
+                const isComplete = batch.status === 'COMPLETED';
+                const eqLabel = batch.model_type === 'advection_linear'
+                  ? `Advecção a=${batch.a_velocity}`
+                  : batch.model_type === 'burgers_viscous'
+                    ? `Burgers ν=${batch.nu_viscosity}`
+                    : 'Burgers Invíscida';
+
+                return (
+                  <div key={batch.id} style={{ background: 'var(--bg-card)', border: `1px solid ${isExpanded ? 'rgba(139,92,246,0.5)' : 'var(--border-color)'}`, borderRadius: '14px', overflow: 'hidden', transition: 'border-color 0.2s' }}>
+
+                    {/* Cabeçalho do card */}
+                    <div style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}
+                         onClick={() => setSelectedBatch(isExpanded ? null : batch)}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 700, fontSize: '1rem' }}>Batch #{batch.id}</span>
+                          <span style={{ fontSize: '0.78rem', padding: '2px 10px', borderRadius: '20px', background: isComplete ? 'rgba(16,185,129,0.15)' : 'rgba(251,191,36,0.15)', color: isComplete ? '#10b981' : '#fbbf24', border: `1px solid ${isComplete ? 'rgba(16,185,129,0.3)' : 'rgba(251,191,36,0.3)'}` }}>
+                            {isComplete ? 'Concluído' : `${batch.completed_runs}/${batch.n_seeds} rodando`}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                          {eqLabel} · {batch.n_layers}×{batch.n_neurons} · {batch.epochs_adam} épocas · N_f={batch.n_collocation} · {batch.n_seeds} seeds
+                        </div>
+                      </div>
+
+                      {/* Barra de progresso */}
+                      <div style={{ width: '120px', flexShrink: 0 }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px', textAlign: 'right' }}>{pct}%</div>
+                        <div style={{ height: '6px', background: 'var(--border-color)', borderRadius: '3px' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: isComplete ? '#10b981' : '#8b5cf6', borderRadius: '3px', transition: 'width 0.4s' }} />
+                        </div>
+                      </div>
+
+                      {/* Stats compactos */}
+                      {isComplete && batch.l2_mean != null && (
+                        <div style={{ display: 'flex', gap: '20px', flexShrink: 0 }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>L² médio</div>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#10b981' }}>{batch.l2_mean.toExponential(2)}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>±{batch.l2_std?.toExponential(1)}</div>
+                          </div>
+                          {batch.linf_mean != null && (
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>L∞ médio</div>
+                              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#f59e0b' }}>{batch.linf_mean.toExponential(2)}</div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>±{batch.linf_std?.toExponential(1)}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <button onClick={(e) => { e.stopPropagation(); deleteBatch(batch.id); }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '6px', flexShrink: 0 }}
+                              title="Deletar batch">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+
+                    {/* Detalhes expandidos */}
+                    {isExpanded && (
+                      <div style={{ borderTop: '1px solid var(--border-color)', padding: '24px' }}>
+
+                        {/* Tabela de estatísticas */}
+                        {isComplete && (
+                          <div style={{ marginBottom: '24px' }}>
+                            <h3 style={{ marginBottom: '12px', fontSize: '0.95rem' }}>Estatísticas Agregadas ({batch.completed_runs} seeds)</h3>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                              <thead>
+                                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                                  <th style={{ textAlign: 'left', padding: '8px 12px' }}>Métrica</th>
+                                  <th style={{ textAlign: 'right', padding: '8px 12px' }}>Média</th>
+                                  <th style={{ textAlign: 'right', padding: '8px 12px' }}>Desvio Padrão</th>
+                                  <th style={{ textAlign: 'right', padding: '8px 12px' }}>CV (%)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[
+                                  { label: 'Loss Final', mean: batch.loss_mean, std: batch.loss_std },
+                                  { label: 'Erro L² rel.', mean: batch.l2_mean, std: batch.l2_std },
+                                  { label: 'Erro L∞', mean: batch.linf_mean, std: batch.linf_std },
+                                ].filter(r => r.mean != null).map((row, i) => {
+                                  const cv = row.mean > 0 ? (row.std / row.mean * 100) : null;
+                                  return (
+                                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                      <td style={{ padding: '8px 12px', fontWeight: 500 }}>{row.label}</td>
+                                      <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{row.mean.toExponential(4)}</td>
+                                      <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{row.std?.toExponential(4) ?? '—'}</td>
+                                      <td style={{ padding: '8px 12px', textAlign: 'right', color: cv > 10 ? '#ef4444' : '#10b981' }}>
+                                        {cv != null ? cv.toFixed(1) + '%' : '—'}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {/* Gráfico de convergência com banda */}
+                        {batch.completed_runs > 0 && (
+                          <div style={{ marginBottom: '24px' }}>
+                            <h3 style={{ marginBottom: '12px', fontSize: '0.95rem' }}>Convergência — Média ± 1σ</h3>
+                            <img
+                              src={`${API_URL}/batches/${batch.id}/loss_chart?runs=${batch.completed_runs}`}
+                              alt="Loss chart batch"
+                              style={{ width: '100%', borderRadius: '10px', border: '1px solid var(--border-color)' }}
+                            />
+                          </div>
+                        )}
+
+                        {/* IDs dos experimentos filhos */}
+                        <div>
+                          <h3 style={{ marginBottom: '10px', fontSize: '0.95rem' }}>Experimentos individuais</h3>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {batch.experiment_ids.map(eid => {
+                              const exp = experiments.find(e => e.id === eid);
+                              return (
+                                <span key={eid}
+                                      onClick={() => exp?.results_dir && setSelectedExp(exp)}
+                                      style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '0.8rem', cursor: exp?.results_dir ? 'pointer' : 'default', border: '1px solid var(--border-color)', background: exp?.status === 'COMPLETED' ? 'rgba(16,185,129,0.1)' : exp?.status === 'FAILED' ? 'rgba(239,68,68,0.1)' : 'rgba(251,191,36,0.1)', color: exp?.status === 'COMPLETED' ? '#10b981' : exp?.status === 'FAILED' ? '#ef4444' : '#fbbf24' }}>
+                                  Exp #{eid} (seed {exp?.seed ?? '…'})
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {currentRoute === 'rawdata' && (() => {
+        const rawFields = ['id','timestamp','model_type','a_velocity','nu_viscosity','u0_name','x_min','x_max','t_min','t_max','n_layers','n_neurons','activation','lr_adam','epochs_adam','epochs_lbfgs','n_collocation','status','time_taken_sec','loss_final','loss_f_final','loss_u_final','l2_error','linf_error','has_exact_solution','nu_numerical','mu_numerical','diagnostico','comments'];
+        const rawData = experiments.map(e => {
+          const row = {};
+          rawFields.forEach(f => { row[f] = e[f] ?? null; });
+          return row;
+        });
+
+        const exportJSON = () => {
+          const blob = new Blob([JSON.stringify(rawData, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = 'pinn_lab_experiments.json'; a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        const exportCSV = () => {
+          const header = rawFields.join(',');
+          const rows = rawData.map(r => rawFields.map(f => {
+            const v = r[f];
+            if (v === null || v === undefined) return '';
+            const s = String(v);
+            return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s;
+          }).join(','));
+          const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = 'pinn_lab_experiments.csv'; a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        return (
+          <div style={{ padding: '40px', overflowY: 'auto', flex: 1, color: 'var(--text-primary)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '30px', flexWrap: 'wrap', gap: '15px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{ width: '50px', height: '50px', borderRadius: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Download color="var(--accent-color)" size={28} />
+                </div>
+                <div>
+                  <h1 style={{ color: '#fff', margin: 0 }}>Dados Brutos</h1>
+                  <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>{experiments.length} experimentos registrados</p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={exportJSON} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 20px' }}>
+                  <Download size={16} /> Exportar JSON
+                </button>
+                <button onClick={exportCSV} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 20px', backgroundColor: '#10b981' }}>
+                  <Download size={16} /> Exportar CSV
+                </button>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '0', overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                <thead>
+                  <tr style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                    {rawFields.map(f => (
+                      <th key={f} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--accent-hover)', fontWeight: 600, borderBottom: '1px solid var(--border-color)' }}>{f}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawData.map((row, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                      {rawFields.map(f => (
+                        <td key={f} style={{ padding: '8px 12px', color: row[f] === null ? 'rgba(255,255,255,0.2)' : 'var(--text-primary)' }}>
+                          {row[f] === null ? '—' : typeof row[f] === 'number' && !Number.isInteger(row[f]) ? row[f].toExponential(4) : String(row[f])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {currentRoute === 'sobre' && (
+        <div style={{ padding: '40px', overflowY: 'auto', flex: 1, color: 'var(--text-primary)', maxWidth: '800px', margin: '0 auto', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '30px', gap: '15px' }}>
+            <div style={{ width: '50px', height: '50px', borderRadius: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Info color="var(--accent-color)" size={28} />
+            </div>
+            <h1 style={{ color: '#fff', margin: 0 }}>Sobre o Projeto</h1>
+          </div>
+
+          <div className="card" style={{ padding: '40px', display: 'flex', flexDirection: 'column', gap: '30px' }}>
+            
+            <div>
+              <h2 style={{ color: 'var(--accent-color)', display: 'flex', alignItems: 'center', gap: '10px', marginTop: 0 }}>
+                <Layers size={24} /> PINN Lab & Scientific Machine Learning
+              </h2>
+              <p style={{ lineHeight: '1.7', color: 'var(--text-muted)' }}>
+                O <strong>PINN Lab</strong> é uma plataforma interativa concebida sob o paradigma da <em>Scientific Machine Learning (SciML)</em>. Seu objetivo central é proporcionar uma imersão onde a Inteligência Artificial é "auditada" pelo rigor da Análise Numérica. O sistema permite treinar, explorar e realizar o "Diagnóstico Físico do Resíduo" em redes neurais informadas pela física, solucionando Equações Diferenciais Parciais (EDPs) e interpretando falhas de aprendizado como fenômenos de difusão ou dispersão numérica.
+              </p>
+            </div>
+
+            <div style={{ height: '1px', backgroundColor: 'var(--border-color)', width: '100%' }}></div>
+
+            <div>
+              <h2 style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: '10px', marginTop: 0 }}>
+                <BookOpen size={24} color="#10b981" /> Contexto Acadêmico
+              </h2>
+              <div style={{ padding: '20px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <p style={{ margin: 0, fontSize: '1.1rem' }}><strong>Universidade Estadual de Campinas (UNICAMP) - IMECC</strong></p>
+                <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                  Projeto desenvolvido no escopo da disciplina <strong>MS901 - Tópicos Especiais de Matemática Aplicada</strong>, 
+                  oferecida no formato de Disciplina Espelho integrada com a Pós-Graduação (<strong>MT861 - Tópicos em Aprendizagem de Matemática Aplicada e Computacional</strong>).
+                </p>
+                <div style={{ marginTop: '10px', padding: '15px', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderLeft: '4px solid #10b981', borderRadius: '4px' }}>
+                  <p style={{ margin: 0, color: '#e5e7eb' }}><strong>Professores Responsáveis:</strong> Prof. Eduardo Abreu e Prof. João Florindo</p>
                 </div>
               </div>
             </div>
+
+            <div style={{ height: '1px', backgroundColor: 'var(--border-color)', width: '100%' }}></div>
+
+            <div>
+              <h2 style={{ color: '#fff', marginTop: 0 }}>Desenvolvido por</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px', padding: '20px', backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ margin: '0 0 5px 0', fontSize: '1.3rem', color: '#fff' }}>Guilherme de Medeiros</h3>
+                  <p style={{ margin: 0, color: 'var(--accent-hover)' }}>Estudante de Matemática Aplicada e Desenvolvedor</p>
+                </div>
+                <a 
+                  href="https://www.linkedin.com/in/guilhermedemedeiros/" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#0077b5', color: '#fff', textDecoration: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', transition: 'transform 0.2s' }}
+                  onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  <Link size={20} /> LinkedIn
+                </a>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
